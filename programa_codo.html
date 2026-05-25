@@ -1,0 +1,1835 @@
+<html lang="es"><head>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html-to-image/1.11.13/html-to-image.min.js" integrity="sha512-iZ2ORl595Wx6miw+GuadDet4WQbdSWS3JLMoNfY8cRGoEFy6oT3G9IbcrBeL6AfkgpA51ETt/faX6yLV+/gFJg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script>
+      (function() {
+        const originalConsole = window.console;
+        window.console = {
+          log: (...args) => {
+            originalConsole.log(...args);
+            window.parent.postMessage({ type: 'console', message: args.join(' ') }, '*');
+          },
+          error: (...args) => {
+            originalConsole.error(...args);
+            window.parent.postMessage({ type: 'console', message: 'Error: ' + args.join(' ') }, '*');
+          },
+          warn: (...args) => {
+            originalConsole.warn(...args);
+            window.parent.postMessage({ type: 'console', message: 'Warning: ' + args.join(' ') }, '*');
+          }
+        };
+
+        let requestId = 0;
+        let callbacksMap = new Map();
+        let streamControllers = new Map();
+        
+        window.claude = {
+          complete: (prompt) => {
+            return new Promise((resolve, reject) => {
+              const id = requestId++;
+              callbacksMap.set(id, { resolve, reject });
+              window.parent.postMessage({ type: 'claudeComplete', id, prompt }, '*');
+            });
+          }
+        };
+
+        window.storage = {
+          get: (key, shared = false) => {
+            return new Promise((resolve, reject) => {
+              const id = requestId++;
+              callbacksMap.set(id, { resolve, reject });
+              window.parent.postMessage({ type: 'storageGet', id, key, shared }, '*');
+            });
+          },
+          set: (key, value, shared = false) => {
+            return new Promise((resolve, reject) => {
+              const id = requestId++;
+              callbacksMap.set(id, { resolve, reject });
+              window.parent.postMessage({ type: 'storageSet', id, key, value, shared }, '*');
+            });
+          },
+          delete: (key, shared = false) => {
+            return new Promise((resolve, reject) => {
+              const id = requestId++;
+              callbacksMap.set(id, { resolve, reject });
+              window.parent.postMessage({ type: 'storageDelete', id, key, shared }, '*');
+            });
+          },
+          list: (prefix, shared = false) => {
+            return new Promise((resolve, reject) => {
+              const id = requestId++;
+              callbacksMap.set(id, { resolve, reject });
+              window.parent.postMessage({ type: 'storageList', id, prefix, shared }, '*');
+            });
+          }
+        };
+
+        let pendingBlobs = new Map();
+        URL.createObjectURL = (blob) => {
+          // Store the blob and create an ID and URL for it
+          const blobId = `blob-${Date.now()}-${Math.random()}`;
+          pendingBlobs.set(blobId, blob);
+          return `blob-request://${blobId}`;
+        };
+
+        URL.revokeObjectURL = (url) => {
+          // Remove the blob from our store
+          const blobId = url.replace("blob-request://", "");
+          pendingBlobs.delete(blobId);
+        };
+
+        const getBlobFromURL = (url) => {
+          const blobId = url.replace("blob-request://", "");
+          return pendingBlobs.get(blobId);
+        };
+
+        // Override global fetch with streaming support
+        window.fetch = (url, init = {}) => {
+          return new Promise((resolve, reject) => {
+            const id = requestId++;
+            const channelId = `fetch-${id}-${Date.now()}`;
+            
+            callbacksMap.set(id, { 
+              resolve: (response) => {
+                // Create a ReadableStream for the response body
+                const stream = new ReadableStream({
+                  start(controller) {
+                    streamControllers.set(channelId, controller);
+                  },
+                  cancel() {
+                    streamControllers.delete(channelId);
+                  }
+                });
+                
+                // Create and return the Response with the stream
+                resolve(new Response(stream, {
+                  status: response.status,
+                  statusText: response.statusText,
+                  headers: response.headers
+                }));
+              },
+              reject,
+              channelId
+            });
+            
+            window.parent.postMessage({
+              type: 'proxyFetch',
+              id,
+              url,
+              init,
+              channelId
+            }, '*');
+          });
+        };
+
+        window.addEventListener('message', async (event) => {
+          if (event.data.type === 'takeScreenshot') {
+            const rootElement = document.getElementById('artifacts-component-root-html');
+            if (!rootElement) {
+              window.parent.postMessage({
+                type: 'screenshotError',
+                error: new Error('Root element not found'),
+              }, '*');
+              return;
+            }
+            // Catch CDN load failures (htmlToImage undefined) and toPng errors
+            // so the parent always gets a response instead of hanging forever.
+            try {
+              const screenshot = await htmlToImage.toPng(rootElement, {
+                imagePlaceholder:
+                  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAA1JREFUGFdjePDgwX8ACOQDoNsk0PMAAAAASUVORK5CYII=",
+              });
+              window.parent.postMessage({
+                type: 'screenshotData',
+                data: screenshot,
+              }, '*');
+            } catch (err) {
+              window.parent.postMessage({
+                type: 'screenshotError',
+                error: err instanceof Error ? err : new Error(String(err)),
+              }, '*');
+            }
+          } else if (event.data.type === 'claudeComplete') {
+            const callback = callbacksMap.get(event.data.id);
+            if (event.data.error) {
+              callback.reject(new Error(event.data.error));
+            } else {
+              callback.resolve(event.data.completion);
+            }
+            callbacksMap.delete(event.data.id);
+          } else if (event.data.type === 'proxyFetchResponse') {
+            const callback = callbacksMap.get(event.data.id);
+            if (event.data.error) {
+              callback.reject(new Error(event.data.error));
+              callbacksMap.delete(event.data.id);
+            } else {
+              // Initial response with headers, status, etc.
+              callback.resolve({
+                status: event.data.status,
+                statusText: event.data.statusText,
+                headers: event.data.headers
+              });
+              // Don't delete the callback yet if streaming
+              if (!event.data.body) {
+                callbacksMap.delete(event.data.id);
+              }
+            }
+          } else if (event.data.type === 'proxyFetchStream') {
+            // Handle streaming data chunks
+            const controller = streamControllers.get(event.data.channelId);
+            if (controller) {
+              if (event.data.error) {
+                controller.error(new Error(event.data.error));
+                streamControllers.delete(event.data.channelId);
+              } else if (event.data.done) {
+                controller.close();
+                streamControllers.delete(event.data.channelId);
+                // Clean up the callback
+                const callback = Array.from(callbacksMap.entries()).find(
+                  ([_, value]) => value.channelId === event.data.channelId
+                );
+                if (callback) {
+                  callbacksMap.delete(callback[0]);
+                }
+              } else if (event.data.chunk) {
+                controller.enqueue(new Uint8Array(event.data.chunk));
+              }
+            }
+          } else if (event.data.type === 'storageGet') {
+            const callback = callbacksMap.get(event.data.id);
+            if (event.data.error) {
+              callback.reject(new Error(event.data.error));
+            } else {
+              callback.resolve(event.data.result);
+            }
+            callbacksMap.delete(event.data.id);
+          } else if (event.data.type === 'storageSet') {
+            const callback = callbacksMap.get(event.data.id);
+            if (event.data.error) {
+              callback.reject(new Error(event.data.error));
+            } else {
+              callback.resolve(event.data.result);
+            }
+            callbacksMap.delete(event.data.id);
+          } else if (event.data.type === 'storageDelete') {
+            const callback = callbacksMap.get(event.data.id);
+            if (event.data.error) {
+              callback.reject(new Error(event.data.error));
+            } else {
+              callback.resolve(event.data.result);
+            }
+            callbacksMap.delete(event.data.id);
+          } else if (event.data.type === 'storageList') {
+            const callback = callbacksMap.get(event.data.id);
+            if (event.data.error) {
+              callback.reject(new Error(event.data.error));
+            } else {
+              callback.resolve(event.data.result);
+            }
+            callbacksMap.delete(event.data.id);
+          }
+        });
+
+        window.addEventListener('click', (event) => {
+          const isEl = event.target instanceof HTMLElement;
+          if (!isEl) return;
+    
+          // find ancestor links
+          const linkEl = event.target.closest("a");
+          if (!linkEl || !linkEl.href) return;
+    
+          event.preventDefault();
+          event.stopImmediatePropagation();
+    
+          if (linkEl.href.startsWith("blob-request:")) {
+            const blob = getBlobFromURL(linkEl.href);
+            if (!blob) return;
+            void blob.arrayBuffer().then((data) => {
+              window.parent.postMessage({
+                type: "downloadFile",
+                filename: linkEl.download,
+                data,
+                mimeType: blob.type || "application/octet-stream",
+              });
+            });
+          } else if (linkEl.href.startsWith("data:")) {
+            const [header, base64Data] = linkEl.href.split(",");
+            const mimeMatch = header.match(/data:([^;]+)/);
+            const mimeType = mimeMatch ? mimeMatch[1] : "application/octet-stream";
+            const binaryString = atob(base64Data);
+            const data = Uint8Array.from(binaryString, (c) =>
+              c.charCodeAt(0),
+            ).buffer;
+            window.parent.postMessage({
+              type: "downloadFile",
+              filename: linkEl.download,
+              data,
+              mimeType,
+            });
+          } else {
+            let linkUrl;
+            try {
+              linkUrl = new URL(linkEl.href);
+            } catch (error) {
+              return;
+            }
+    
+            if (linkUrl.hostname === window.location.hostname) return;
+      
+            window.parent.postMessage({
+              type: 'openExternal',
+              href: linkEl.href,
+            }, '*');
+          }
+      });
+
+        const originalOpen = window.open;
+        window.open = function (url) {
+          window.parent.postMessage({
+            type: "openExternal",
+            href: url,
+          }, "*");
+        };
+
+        window.addEventListener('error', (event) => {
+          window.parent.postMessage({ type: 'console', message: 'Uncaught Error: ' + event.message }, '*');
+        });
+      })();
+    </script>
+  
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Programa de Rehabilitacion</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&amp;family=DM+Serif+Display&amp;display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#1B3252;--teal:#007A8C;--teal-lt:#E3F4F6;
+  --orange:#D95F2B;--or-lt:#FDF0E8;--green:#2A6B3E;--gr-lt:#EAF4EE;
+  --amber:#B8740A;--am-lt:#FDF6E3;--red:#B42B2B;--rd-lt:#FDF0F0;
+  --border:#DDE3EE;--bg:#F3F5FA;--card:#fff;
+  --text:#18202E;--text2:#4F5C73;--text3:#8899B0;
+  --radius:10px;--shadow:0 2px 10px rgba(27,50,82,.08);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:'DM Sans',system-ui,sans-serif;font-size:15px;line-height:1.6;color:var(--text);background:var(--bg)}
+button{font-family:inherit;cursor:pointer}a{color:var(--teal);text-decoration:none}
+.container{max-width:860px;margin:0 auto;padding:0 16px}
+header{background:linear-gradient(135deg,#1B3252 0%,#0F4C6A 100%);padding:22px 0 0}
+.hdr-row{display:flex;align-items:flex-start;gap:14px;padding-bottom:18px;flex-wrap:wrap}
+.hdr-icon{width:48px;height:48px;border-radius:12px;background:rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
+.hdr-main h1{font-family:'DM Serif Display',serif;font-size:20px;color:#fff;font-weight:400}
+.hdr-main p{font-size:13px;color:rgba(255,255,255,.6);margin-top:2px}
+.hdr-right{margin-left:auto;text-align:right}
+.hdr-patient{font-size:14px;font-weight:600;color:#fff}
+.hdr-dx{font-size:12px;color:rgba(255,255,255,.6);margin-top:2px}
+.btn-export{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:8px;font-size:12px;font-weight:600;color:#fff;margin-top:6px;transition:background .2s}
+.btn-export:hover{background:rgba(255,255,255,.28)}
+.timeline{display:flex}
+.tl-item{flex:1;text-align:center;cursor:pointer;padding:10px 4px 12px;border-radius:8px 8px 0 0;transition:background .15s;position:relative;-webkit-tap-highlight-color:transparent}
+.tl-item:hover{background:rgba(255,255,255,.08)}
+.tl-item.active{background:rgba(255,255,255,.14)}
+.tl-item::after{content:'';position:absolute;bottom:0;left:0;right:0;height:3px;background:transparent;border-radius:2px 2px 0 0}
+.tl-item.active::after{background:rgba(255,255,255,.55)}
+.tl-dot{width:30px;height:30px;border-radius:50%;margin:0 auto 5px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;position:relative;z-index:1}
+.mc1 .tl-dot{background:#5BC8D8;color:#0F3D50}
+.mc2 .tl-dot{background:#F4A347;color:#5B2E00}
+.mc3 .tl-dot{background:#7DCA8C;color:#1A4A26}
+.tl-item.active .tl-dot{box-shadow:0 0 0 3px rgba(255,255,255,.3)}
+.tl-label{font-size:12px;color:rgba(255,255,255,.85);font-weight:500}
+.tl-weeks{font-size:10px;color:rgba(255,255,255,.5)}
+.main-nav{background:var(--card);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:200;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.nav-inner{display:flex;overflow-x:auto}
+.nav-btn{padding:13px 18px;font-size:13px;font-weight:500;color:var(--text2);border:none;background:none;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap;transition:all .15s;flex-shrink:0;min-height:44px}
+.nav-btn:hover{color:var(--teal)}.nav-btn.active{color:var(--navy);border-bottom-color:var(--navy);font-weight:600}
+.nav-btn.add-btn{color:var(--teal)}
+.top-bar{display:flex;align-items:center;gap:8px;padding:16px 0 8px;flex-wrap:wrap}
+.top-title{font-size:16px;font-weight:600;color:var(--navy)}.spacer{flex:1}
+.btn-print{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--card);border:1px solid var(--border);border-radius:8px;font-size:13px;font-weight:500;color:var(--text2);transition:all .15s}
+.btn-print:hover{border-color:var(--navy);color:var(--navy)}
+.btn-edit-mode{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--card);border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-weight:500;color:var(--text2);transition:all .15s}
+.btn-edit-mode:hover{border-color:var(--amber);color:var(--amber)}
+.btn-edit-mode.on{background:var(--am-lt);border-color:var(--amber);color:var(--amber)}
+body.edit-mode .btn-del{opacity:1!important;background:var(--rd-lt)!important;color:var(--red)!important}
+body.edit-mode .ex-card{border-color:var(--amber)}
+.phase-panel{display:none}.phase-panel.active{display:block}
+.info-box{padding:12px 16px;border-radius:var(--radius);font-size:13px;margin-bottom:16px;display:flex;gap:10px;line-height:1.55;border:1px solid transparent}
+.ib-blue{background:#EBF5FF;color:#0D3C6B;border-color:#B8D9F7}
+.ib-orange{background:var(--or-lt);color:#7A3010;border-color:#F6C89A}
+.ib-green{background:var(--gr-lt);color:#1A4226;border-color:#9CCFAD}
+.ib-red{background:var(--rd-lt);color:#7A1A1A;border-color:#F5B0B0}
+.ib-icon{flex-shrink:0;font-size:17px;margin-top:1px}
+.criteria{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:18px}
+.crit-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px}
+.crit-label{font-size:11px;color:var(--text3);margin-bottom:3px}
+.crit-value{font-size:14px;font-weight:600;color:var(--navy)}
+.day-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.day-tab{padding:8px 16px;border:1.5px solid var(--border);border-radius:8px;background:var(--card);font-size:13px;color:var(--text2);font-weight:500;transition:all .15s;min-height:44px}
+.day-tab:hover{border-color:var(--teal);color:var(--teal)}
+.day-tab.active{background:var(--navy);border-color:var(--navy);color:#fff}
+.day-label-bar{display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:10px 14px;border-radius:var(--radius);border:1px solid var(--border);background:var(--card);flex-wrap:wrap}
+.day-badge{padding:4px 12px;border-radius:99px;font-size:12px;font-weight:700}
+.badge-a{background:#E8EEFF;color:#2D3BA0}
+.badge-b{background:var(--or-lt);color:var(--orange)}
+.day-freq{font-size:12px;color:var(--text3)}
+.day-focus{font-size:12px;color:var(--text2);margin-left:auto}
+.btn-add-ex{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border:1.5px dashed var(--teal);border-radius:8px;background:none;font-size:12px;color:var(--teal);font-weight:500;transition:all .15s;margin-bottom:20px}
+.btn-add-ex:hover{background:var(--teal-lt)}
+.ex-grid{display:flex;flex-direction:column;gap:12px;margin-bottom:12px}
+.ex-card{background:var(--card);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;box-shadow:var(--shadow);transition:border-color .2s}
+.ex-card.is-impact{border-left:4px solid var(--orange)}
+.ex-card.is-added{border-left:4px solid var(--teal)}
+.ex-head{display:flex;align-items:flex-start;gap:12px;padding:13px 16px 8px}
+.ex-num{width:30px;height:30px;border-radius:8px;background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0;margin-top:2px}
+.is-impact .ex-num{background:var(--orange)}
+.is-added .ex-num{background:var(--teal)}
+.ex-title-wrap{flex:1}
+.ex-name{font-size:15px;font-weight:600;color:var(--navy);margin-bottom:4px}
+.ex-focus-tag{font-size:11px;padding:2px 8px;border-radius:99px;background:#EEF1FF;color:#3540A0;font-weight:500;display:inline-block}
+.is-impact .ex-focus-tag{background:var(--or-lt);color:var(--orange)}
+.is-added .ex-focus-tag{background:var(--teal-lt);color:var(--teal)}
+.btn-del{margin-left:auto;background:none;border:none;font-size:16px;color:var(--text3);padding:4px 8px;border-radius:6px;transition:all .2s;display:flex;align-items:center;justify-content:center;cursor:pointer;min-height:36px;min-width:36px;opacity:.3;-webkit-tap-highlight-color:transparent}
+.btn-del:hover,.btn-del:active{background:var(--rd-lt);color:var(--red);opacity:1}
+.ex-dose{display:flex;flex-wrap:wrap;gap:6px;padding:0 16px 10px}
+.chip{padding:6px 10px;border-radius:6px;font-size:12px;font-weight:500;border:1px solid transparent;cursor:pointer;transition:box-shadow .15s;display:inline-flex;align-items:center;gap:4px;min-height:36px;touch-action:manipulation}
+.chip:hover{box-shadow:0 0 0 2px var(--teal)}
+.chip-main{background:var(--navy);color:#fff}
+.chip-tempo{background:var(--am-lt);color:var(--amber);border-color:#F0D08C}
+.chip-load{background:var(--gr-lt);color:var(--green);border-color:#9CCFAD}
+.chip-vas{background:var(--rd-lt);color:var(--red);border-color:#F5B0B0}
+.chip input{border:none;outline:none;background:transparent;font-family:inherit;font-size:12px;font-weight:500;width:120px;color:var(--text);display:none}
+.chip.editing{box-shadow:0 0 0 2px var(--teal);background:#fff!important;color:var(--text)!important}
+.chip.editing input{display:inline-block}
+.chip.editing .chip-label{display:none}
+.chip-hint{font-size:9px;opacity:0;transition:opacity .15s;pointer-events:none}
+.chip:hover .chip-hint{opacity:.5}
+.ex-body{padding:0 16px 12px}
+.ex-desc{font-size:13px;color:var(--text2);margin-bottom:9px;line-height:1.55;cursor:pointer;border-radius:6px;padding:5px 7px;margin-left:-7px;transition:background .15s}
+.ex-desc:hover{background:rgba(0,122,140,.07)}
+.ex-cues-wrap{cursor:pointer;border-radius:6px;padding:5px 7px;margin-left:-7px;transition:background .15s}
+.ex-cues-wrap:hover{background:rgba(0,122,140,.07)}
+.ex-cues{list-style:none;padding:0}
+.ex-cues li{font-size:13px;color:var(--text2);padding:3px 0 3px 22px;position:relative;line-height:1.4}
+.ex-cues li::before{content:'\2192';position:absolute;left:0;color:var(--teal);font-weight:700}
+.edit-hint-txt{font-size:10px;color:var(--text3);margin-top:3px;display:none}
+.ex-desc:hover .edit-hint-txt,.ex-cues-wrap:hover .edit-hint-txt{display:block}
+.text-edit-area{width:100%;border:1.5px solid var(--teal);border-radius:6px;padding:8px;font-family:inherit;font-size:13px;color:var(--text2);line-height:1.55;resize:vertical;outline:none}
+.text-edit-row{display:flex;gap:6px;margin-top:6px}
+.btn-te-save{padding:5px 12px;background:var(--teal);color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer}
+.btn-te-save:hover{background:#005F70}
+.btn-te-cancel{padding:5px 10px;background:none;border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text2);cursor:pointer}
+.ex-prog{font-size:12px;color:var(--green);background:var(--gr-lt);border:1px solid #9CCFAD;border-radius:6px;padding:7px 10px;margin-top:9px}
+.ex-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 16px;background:#FAFBFD;border-top:1px solid var(--border)}
+.btn-yt{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;background:#FF0000;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:600;text-decoration:none;transition:background .2s;cursor:pointer}
+.btn-yt:hover{background:#CC0000;color:#fff}
+.btn-yt-search{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;background:#888;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:600;text-decoration:none;transition:background .2s}
+.btn-yt-search:hover{background:#555;color:#fff}
+.btn-vid-edit{display:inline-flex;align-items:center;gap:4px;padding:6px 10px;background:none;border:1.5px dashed #bbb;border-radius:7px;font-size:11px;color:var(--text3);cursor:pointer;transition:all .2s}
+.btn-vid-edit:hover{border-color:#FF0000;color:#FF0000}
+.vas-badge{margin-left:auto;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;background:var(--rd-lt);color:var(--red);border:1px solid #F5B0B0}
+.vid-edit-wrap{display:none;padding:8px 16px 12px;border-top:1px solid var(--border);background:#fafbfd;gap:6px;align-items:center;flex-wrap:wrap}
+.vid-edit-wrap.open{display:flex}
+.vid-edit-inp{flex:1;min-width:180px;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;font-family:inherit;color:var(--text);outline:none}
+.vid-edit-inp:focus{border-color:#FF0000}
+.btn-vid-save{padding:7px 12px;background:#FF0000;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer}
+.btn-vid-cancel{padding:7px 10px;background:none;border:1px solid var(--border);border-radius:7px;font-size:12px;color:var(--text2);cursor:pointer}
+.add-form-wrap{background:var(--card);border-radius:var(--radius);border:1px solid var(--border);padding:20px;box-shadow:var(--shadow)}
+.fg{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.fg label{font-size:12px;font-weight:600;color:var(--text2)}
+.fg input,.fg select,.fg textarea{padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;color:var(--text);background:var(--bg);transition:border-color .15s}
+.fg input:focus,.fg select:focus,.fg textarea:focus{outline:none;border-color:var(--teal)}
+.fg textarea{resize:vertical;min-height:72px}
+.fg .hint{font-size:11px;color:var(--text3);margin-top:2px}
+.fg-row{display:grid;gap:12px}
+.fg-2{grid-template-columns:1fr 1fr}
+.fg-4{grid-template-columns:1fr 1fr 1fr 1fr}
+.check-row{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);margin-bottom:16px}
+.check-row input{width:16px;height:16px;accent-color:var(--orange)}
+.form-actions{display:flex;gap:10px;justify-content:flex-end}
+.btn-cancel{padding:9px 18px;border:1.5px solid var(--border);border-radius:8px;background:none;font-size:13px;color:var(--text2)}
+.btn-submit{padding:9px 20px;background:var(--teal);border:none;border-radius:8px;font-size:13px;font-weight:600;color:#fff}
+.btn-submit:hover{background:#005F70}
+.rules-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);margin-bottom:16px}
+.rules-hdr{background:var(--navy);color:#fff;padding:13px 18px;font-size:15px;font-weight:600}
+.rule-row{display:flex;gap:13px;align-items:flex-start;padding:14px 18px;border-bottom:1px solid var(--border)}
+.rule-row:last-child{border-bottom:none}
+.rule-dot{width:38px;height:38px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;font-weight:700}
+.dot-g{background:var(--gr-lt);color:var(--green)}
+.dot-y{background:var(--am-lt);color:var(--amber)}
+.dot-r{background:var(--rd-lt);color:var(--red)}
+.rule-body{font-size:13px;color:var(--text2);line-height:1.55}
+.rule-body strong{color:var(--text)}
+.vas-table-wrap{overflow-x:auto;margin-bottom:14px}
+.vas-table{width:100%;border-collapse:collapse;background:var(--card);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);border:1px solid var(--border)}
+.vas-table th,.vas-table td{padding:10px 12px;font-size:13px;text-align:center;border:1px solid var(--border)}
+.vas-table th{background:var(--navy);color:#fff;font-weight:600;font-size:12px}
+.vas-table th.left{text-align:left;background:#1F3D5F}
+.vas-table td:first-child{text-align:left;font-weight:500;color:var(--navy);background:#F6F8FF;min-width:160px}
+.vas-inp{width:50px;padding:5px 6px;border:1.5px solid var(--border);border-radius:6px;text-align:center;font-size:13px;font-family:inherit;outline:none}
+.vas-inp:focus{border-color:var(--teal)}
+.cv0{background:#C8E6C9!important}.cv13{background:#DCEDC8!important}
+.cv4{background:#FFF9C4!important}.cv56{background:#FFE0B2!important}.cv7p{background:#FFCDD2!important}
+.legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:4px}
+.leg-item{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text2)}
+.leg-dot{width:10px;height:10px;border-radius:50%}
+.btn-row{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.btn-outline{display:inline-flex;align-items:center;gap:5px;padding:7px 14px;background:var(--card);border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--text2);transition:all .15s;cursor:pointer}
+.btn-outline:hover{border-color:var(--teal);color:var(--teal)}
+.btn-danger:hover{border-color:var(--red)!important;color:var(--red)!important}
+.vid-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:500;align-items:center;justify-content:center}
+.vid-bg.open{display:flex}
+.vid-box{background:#000;border-radius:14px;width:92%;max-width:720px;overflow:hidden;position:relative}
+.vid-close{position:absolute;top:10px;right:10px;background:rgba(255,255,255,.15);border:none;color:#fff;width:32px;height:32px;border-radius:50%;font-size:17px;z-index:10;display:flex;align-items:center;justify-content:center;cursor:pointer}
+#vidFrame{width:100%;aspect-ratio:16/9;border:none;display:block}
+.save-banner{display:none;position:sticky;top:0;z-index:250;background:#D95F2B;color:#fff;padding:10px 16px;align-items:center;justify-content:space-between;gap:12px;font-size:13px;width:100%;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.save-banner.show{display:flex}
+.save-banner strong{font-weight:600}
+.btn-save-now{padding:7px 16px;background:#fff;color:#D95F2B;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.btn-save-now:hover{background:#ffe8df}
+footer{background:var(--navy);color:rgba(255,255,255,.55);padding:18px 0;text-align:center;font-size:12px;margin-top:32px}
+footer strong{color:rgba(255,255,255,.9)}
+@media(max-width:640px){
+  .hdr-right{display:none}.tl-weeks{display:none}.hdr-main h1{font-size:17px}
+  .chip{font-size:11px;padding:4px 8px}.day-focus{margin-left:0;width:100%;margin-top:4px}
+  .ex-name{font-size:14px}.ex-desc,.ex-cues li{font-size:12px}
+  .btn-yt,.btn-yt-search{font-size:11px;padding:6px 10px}
+  .nav-btn{padding:12px 14px;font-size:12px}.top-title{font-size:14px}
+  .fg-4{grid-template-columns:1fr 1fr}.fg-2{grid-template-columns:1fr}
+}
+@media print{
+  .main-nav,.btn-print,.btn-export,.btn-edit-mode,.day-tabs,.btn-yt,.btn-yt-search,
+  .vid-bg,footer,.top-bar,.btn-add-ex,.btn-del,.btn-outline,.btn-vid-edit,.vid-edit-wrap{display:none!important}
+  header{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .phase-panel{display:block!important}[id^="day-"]{display:block!important}
+  .ex-card{break-inside:avoid}body{background:#fff}
+}
+</style>
+</head>
+<body id="artifacts-component-root-html">
+<header>
+<div class="container">
+  <div class="hdr-row">
+    <div class="hdr-icon">🧞</div>
+    <div class="hdr-main">
+      <h1>Programa de Rehabilitación — Codo</h1>
+      <p id="hdr-clinician">Fisioterapeuta - Clinica</p>
+    </div>
+    <div class="hdr-right">
+      <div class="hdr-patient" id="hdr-patient">Sonia Riera</div>
+      <div class="hdr-dx" id="hdr-dx">Tendinopatia extensor comun - Codo derecho</div>
+      <button class="btn-export" onclick="exportHTML()">⬇ Exportar para paciente</button>
+    </div>
+  </div>
+  <div class="timeline">
+    <div class="tl-item mc1 active" onclick="showPhase('mc1')">
+      <div class="tl-dot">1</div><div class="tl-label">Fuerza base</div><div class="tl-weeks">Sem 1–2</div>
+    </div>
+    <div class="tl-item mc2" onclick="showPhase('mc2')">
+      <div class="tl-dot">2</div><div class="tl-label">Progresión</div><div class="tl-weeks">Sem 3–4</div>
+    </div>
+    <div class="tl-item mc3" onclick="showPhase('mc3')">
+      <div class="tl-dot">3</div><div class="tl-label">Retorno pádel</div><div class="tl-weeks">Sem 5–6</div>
+    </div>
+  </div>
+</div>
+</header>
+<nav class="main-nav">
+<div class="container"><div class="nav-inner">
+  <button class="nav-btn active" onclick="switchTab('prog')">📋 Programa</button>
+  <button class="nav-btn add-btn" onclick="switchTab('add')">➕ Añadir ejercicio</button>
+  <button class="nav-btn" onclick="switchTab('rules')">🚦 Reglas del dolor</button>
+  <button class="nav-btn" onclick="switchTab('vas')">📊 Mi VAS</button>
+</div></div>
+</nav>
+<div class="save-banner" id="saveBanner">
+  <span>⚠️ <strong>Tienes cambios sin guardar</strong> — Exporta para que se conserven al cerrar</span>
+  <button class="btn-save-now" onclick="exportHTML()">⬇ Guardar ahora</button>
+</div>
+<main><div class="container">
+  <div class="top-bar">
+    <span class="top-title" id="phase-label">Microciclo 1 — Fuerza base (Sem 1–2)</span>
+    <div class="spacer"></div>
+    <button class="btn-edit-mode" id="btnEditMode" onclick="toggleEditMode()">✎ Editar</button>
+    <button class="btn-print" onclick="window.print()">🖨 Imprimir</button>
+  </div>
+  <div id="tab-prog">
+    <div id="mc1" class="phase-panel active"><div class="info-box ib-blue"><span class="ib-icon">ℹ️</span><div>Iniciamos la carga mecanica. Ambos dias contienen fuerza y microimpacto con diferente enfasis. Es normal sentir hasta 4/10 de dolor durante los ejercicios.</div></div><div class="day-tabs" id="tabs-mc1"><button class="day-tab active" onclick="showDay('mc1',0)">Dia A <span style="font-weight:400;opacity:.6;font-size:11px">Ej: Lunes</span></button><button class="day-tab " onclick="showDay('mc1',1)">Dia B <span style="font-weight:400;opacity:.6;font-size:11px">Ej: Jueves</span></button></div><div id="day-mc1-0" style="display:block"><div class="day-label-bar"><span class="day-badge badge-a">Dia A</span><span class="day-freq">Ej: Lunes</span><span class="day-focus">Fuerza predominante - microimpacto ligero</span></div><div class="ex-grid" id="grid-mc1-0"><div class="ex-card"><div class="ex-head"><div class="ex-num">1</div><div class="ex-title-wrap"><div class="ex-name">Extension de muneca con mancuerna</div><span class="ex-focus-tag">Tendon extensor principal</span></div><button class="btn-del" data-mc="mc1" data-di="0" data-ei="0" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc1_0_0_main" data-orig="3 x 10 reps"><span class="chip-label">3 x 10 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc1_0_0_tempo" data-orig="Tempo 3-0-3"><span class="chip-label">Tempo 3-0-3</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc1_0_0_load" data-orig="3kg"><span class="chip-label">3kg</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc1_0_0_vas" data-orig="VAS max 4/10"><span class="chip-label">VAS max 4/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc1-0-0"><div class="ex-desc" data-mc="mc1" data-di="0" data-ei="0" data-type="desc">Antebrazo apoyado, muneca al borde, palma abajo. Sube 3 seg, pausa 0, baja 3 seg. Rango de movimiento completo.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc1" data-di="0" data-ei="0" data-type="cues"><ul class="ex-cues"><li>Antebrazo completamente apoyado en todo momento</li><li>La bajada lenta (3 seg) es la fase mas importante</li><li>No compensar con el hombro</li><li>Si superas 4/10 reduce el peso</li><li>Sube 1kg si completas las reps con dolor 24h menor o igual a 3</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Sube 0.5 kg cuando completes 3x15 con dolor 24h menor o igual a 3</div></div><div class="ex-foot"><button class="btn-yt" onclick="openVid('_CELm_fI4TI')">▶ Ver vídeo</button><button class="btn-vid-edit" data-mc="mc1" data-di="0" data-ei="0">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 4/10</span></div><div class="vid-edit-wrap" id="videdit-mc1-0-0"><input class="vid-edit-inp" id="vidinp-mc1-0-0" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc1" data-di="0" data-ei="0">Guardar</button><button class="btn-vid-cancel" data-mc="mc1" data-di="0" data-ei="0">Cancelar</button></div></div><div class="ex-card"><div class="ex-head"><div class="ex-num">2</div><div class="ex-title-wrap"><div class="ex-name">Extension resistida de dedos</div><span class="ex-focus-tag">Extensores de los dedos</span></div><button class="btn-del" data-mc="mc1" data-di="0" data-ei="1" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc1_0_1_main" data-orig="3 x 10 reps"><span class="chip-label">3 x 10 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc1_0_1_tempo" data-orig="Controlado"><span class="chip-label">Controlado</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc1_0_1_load" data-orig="Goma fina"><span class="chip-label">Goma fina</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc1_0_1_vas" data-orig="VAS max 4/10"><span class="chip-label">VAS max 4/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc1-0-1"><div class="ex-desc" data-mc="mc1" data-di="0" data-ei="1" data-type="desc">Goma fina en los 4 dedos sin pulgar. Abre hasta extension completa, vuelve lentamente. Prueba tambien dedo a dedo.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc1" data-di="0" data-ei="1" data-type="cues"><ul class="ex-cues"><li>Muneca en posicion neutra</li><li>Extension completa en cada repeticion</li><li>Vuelta lenta no soltar de golpe</li><li>Prueba dedo a dedo: indice, corazon, anular</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Aumenta la resistencia cuando 3x15 sea sencillo</div></div><div class="ex-foot"><button class="btn-yt" onclick="openVid('lJWfnYKr6qo')">▶ Ver vídeo</button><button class="btn-vid-edit" data-mc="mc1" data-di="0" data-ei="1">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 4/10</span></div><div class="vid-edit-wrap" id="videdit-mc1-0-1"><input class="vid-edit-inp" id="vidinp-mc1-0-1" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc1" data-di="0" data-ei="1">Guardar</button><button class="btn-vid-cancel" data-mc="mc1" data-di="0" data-ei="1">Cancelar</button></div></div><div class="ex-card"><div class="ex-head"><div class="ex-num">3</div><div class="ex-title-wrap"><div class="ex-name">Prension dinamica - variaciones de agarre</div><span class="ex-focus-tag">Fuerza de grip (pala de padel)</span></div><button class="btn-del" data-mc="mc1" data-di="0" data-ei="2" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc1_0_2_main" data-orig="3 x 15 reps"><span class="chip-label">3 x 15 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc1_0_2_tempo" data-orig="2-1-2"><span class="chip-label">2-1-2</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc1_0_2_load" data-orig="Barra / pelota"><span class="chip-label">Barra / pelota</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc1_0_2_vas" data-orig="VAS max 4/10"><span class="chip-label">VAS max 4/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc1-0-2"><div class="ex-desc" data-mc="mc1" data-di="0" data-ei="2" data-type="desc">Agarre esferico amplio. Tres tipos: cilindrico barra, pinza pulgar+indice, esferico pelota de tenis.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc1" data-di="0" data-ei="2" data-type="cues"><ul class="ex-cues"><li>Usa algo con el grosor de la mano</li><li>Apreton maximo 2 seg suelta despacio</li><li>Sin superar 4/10 de dolor</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Aumenta diametro o peso progresivamente</div></div><div class="ex-foot"><button class="btn-yt" onclick="openVid('5rwHzUzm1hE')">▶ Ver vídeo</button><button class="btn-vid-edit" data-mc="mc1" data-di="0" data-ei="2">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 4/10</span></div><div class="vid-edit-wrap" id="videdit-mc1-0-2"><input class="vid-edit-inp" id="vidinp-mc1-0-2" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc1" data-di="0" data-ei="2">Guardar</button><button class="btn-vid-cancel" data-mc="mc1" data-di="0" data-ei="2">Cancelar</button></div></div><div class="ex-card"><div class="ex-head"><div class="ex-num">4</div><div class="ex-title-wrap"><div class="ex-name">Pronosupinacion cargada</div><span class="ex-focus-tag">Estabilizadores del codo</span></div><button class="btn-del" data-mc="mc1" data-di="0" data-ei="3" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc1_0_3_main" data-orig="3 x 12 reps"><span class="chip-label">3 x 12 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc1_0_3_tempo" data-orig="2-0-2"><span class="chip-label">2-0-2</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc1_0_3_load" data-orig="0.5-1 kg"><span class="chip-label">0.5-1 kg</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc1_0_3_vas" data-orig="VAS max 3/10"><span class="chip-label">VAS max 3/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc1-0-3"><div class="ex-desc" data-mc="mc1" data-di="0" data-ei="3" data-type="desc">Codo 90 grados pegado al cuerpo. Gira desde palma arriba (supinacion) hasta palma abajo (pronacion). Rango completo.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc1" data-di="0" data-ei="3" data-type="cues"><ul class="ex-cues"><li>Codo pegado al cuerpo en todo momento</li><li>Rango completo palma arriba hasta palma abajo</li><li>Movimiento lento y controlado</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Sube 0.5 kg cuando 3x12 sea comodo</div></div><div class="ex-foot"><button class="btn-yt" onclick="openVid('uha1KQRagpI')">▶ Ver vídeo</button><button class="btn-vid-edit" data-mc="mc1" data-di="0" data-ei="3">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 3/10</span></div><div class="vid-edit-wrap" id="videdit-mc1-0-3"><input class="vid-edit-inp" id="vidinp-mc1-0-3" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc1" data-di="0" data-ei="3">Guardar</button><button class="btn-vid-cancel" data-mc="mc1" data-di="0" data-ei="3">Cancelar</button></div></div><div class="ex-card is-impact"><div class="ex-head"><div class="ex-num">5</div><div class="ex-title-wrap"><div class="ex-name">Pica + peso en goma - impacto ligero</div><span class="ex-focus-tag">Microimpacto introductorio</span></div><button class="btn-del" data-mc="mc1" data-di="0" data-ei="4" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc1_0_4_main" data-orig="2 x 12 reps"><span class="chip-label">2 x 12 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc1_0_4_tempo" data-orig="Controlado"><span class="chip-label">Controlado</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc1_0_4_load" data-orig="1kg"><span class="chip-label">1kg</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc1_0_4_vas" data-orig="VAS max 4/10"><span class="chip-label">VAS max 4/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc1-0-4"><div class="ex-desc" data-mc="mc1" data-di="0" data-ei="4" data-type="desc">Pica con peso colgado de goma. Caida muy corta (10 cm), amortigua extendiendo las munecas.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc1" data-di="0" data-ei="4" data-type="cues"><ul class="ex-cues"><li>Altura de caida que no toque suelo. Puedes usar una cuerda.</li><li>La amortiguacion la hacen las munecas</li><li>Nota la tension en el codo: eso es el objetivo</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 En Dia B aumentamos altura y volumen</div></div><div class="ex-foot"><button class="btn-yt" onclick="openVid('cEb-UljPLvg')">▶ Ver vídeo</button><button class="btn-vid-edit" data-mc="mc1" data-di="0" data-ei="4">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 4/10</span></div><div class="vid-edit-wrap" id="videdit-mc1-0-4"><input class="vid-edit-inp" id="vidinp-mc1-0-4" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc1" data-di="0" data-ei="4">Guardar</button><button class="btn-vid-cancel" data-mc="mc1" data-di="0" data-ei="4">Cancelar</button></div></div></div><button class="btn-add-ex" onclick="quickAdd('mc1',0)">➕ Añadir ejercicio aquí</button></div><div id="day-mc1-1" style="display:none"><div class="day-label-bar"><span class="day-badge badge-b">Dia B</span><span class="day-freq">Ej: Jueves</span><span class="day-focus">Microimpacto predominante - fuerza de soporte</span></div><div class="ex-grid" id="grid-mc1-1"><div class="ex-card is-impact"><div class="ex-head"><div class="ex-num">1</div><div class="ex-title-wrap"><div class="ex-name">Pica + peso en goma - microimpacto principal</div><span class="ex-focus-tag">Adaptacion al impacto de la pala</span></div><button class="btn-del" data-mc="mc1" data-di="1" data-ei="0" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc1_1_0_main" data-orig="3 x 3 reps enrrollar"><span class="chip-label">3 x 3 reps enrrollar</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc1_1_0_tempo" data-orig="Controlado"><span class="chip-label">Controlado</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc1_1_0_load" data-orig="1Kg"><span class="chip-label">1Kg</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc1_1_0_vas" data-orig="VAS max 4/10"><span class="chip-label">VAS max 4/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc1-1-0"><div class="ex-desc" data-mc="mc1" data-di="1" data-ei="0" data-type="desc">Volumen e intensidad maximos de microimpacto de esta semana. Deja caer el peso 15 cm y amortigua.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc1" data-di="1" data-ei="0" data-type="cues"><ul class="ex-cues"><li>Suma 1kg de peso sin no hay dolor o molestia</li><li>No más de 1m de largo</li><li>Notarás que se cargan los brazos</li><li>Si duele mas de 4/10 reduce peso o la longitud de recogida</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Sem 3: 20 cm. Sem 5: 30 cm. Sem 5b: unilateral.</div></div><div class="ex-foot"><button class="btn-yt" onclick="openVid('0hUE_yLaPJA')">▶ Ver vídeo</button><button class="btn-vid-edit" data-mc="mc1" data-di="1" data-ei="0">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 4/10</span></div><div class="vid-edit-wrap" id="videdit-mc1-1-0"><input class="vid-edit-inp" id="vidinp-mc1-1-0" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc1" data-di="1" data-ei="0">Guardar</button><button class="btn-vid-cancel" data-mc="mc1" data-di="1" data-ei="0">Cancelar</button></div></div><div class="ex-card"><div class="ex-head"><div class="ex-num">2</div><div class="ex-title-wrap"><div class="ex-name">Extension de muneca - sesion de soporte</div><span class="ex-focus-tag">Tendon extensor mantenimiento</span></div><button class="btn-del" data-mc="mc1" data-di="1" data-ei="1" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc1_1_1_main" data-orig="2 x 12 reps"><span class="chip-label">2 x 12 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc1_1_1_tempo" data-orig="Tempo 3-0-3"><span class="chip-label">Tempo 3-0-3</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc1_1_1_load" data-orig="Igual que Dia A"><span class="chip-label">Igual que Dia A</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc1_1_1_vas" data-orig="VAS max 4/10"><span class="chip-label">VAS max 4/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc1-1-1"><div class="ex-desc" data-mc="mc1" data-di="1" data-ei="1" data-type="desc">Mismo ejercicio que el Dia A pero con menor volumen. Mantener el estimulo de fuerza sin sobrecargar el dia de microimpacto.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc1" data-di="1" data-ei="1" data-type="cues"><ul class="ex-cues"><li>Misma carga que usaste en Dia A</li><li>Solo 2 series</li><li>Si ya estas cansada reduce 0.5 kg</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 La progresion de carga la marca el Dia A</div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=wrist+extension+eccentric+dumbbell" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc1" data-di="1" data-ei="1">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 4/10</span></div><div class="vid-edit-wrap" id="videdit-mc1-1-1"><input class="vid-edit-inp" id="vidinp-mc1-1-1" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc1" data-di="1" data-ei="1">Guardar</button><button class="btn-vid-cancel" data-mc="mc1" data-di="1" data-ei="1">Cancelar</button></div></div><div class="ex-card"><div class="ex-head"><div class="ex-num">3</div><div class="ex-title-wrap"><div class="ex-name">Extension dedos - sesion de soporte</div><span class="ex-focus-tag">Extensores de los dedos</span></div><button class="btn-del" data-mc="mc1" data-di="1" data-ei="2" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc1_1_2_main" data-orig="2 x 12 reps"><span class="chip-label">2 x 12 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc1_1_2_tempo" data-orig="Controlado"><span class="chip-label">Controlado</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc1_1_2_load" data-orig="Goma fina"><span class="chip-label">Goma fina</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc1_1_2_vas" data-orig="VAS max 4/10"><span class="chip-label">VAS max 4/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc1-1-2"><div class="ex-desc" data-mc="mc1" data-di="1" data-ei="2" data-type="desc">Misma goma que en Dia A menor volumen. Incluye extension dedo a dedo si has progresado bien.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc1" data-di="1" data-ei="2" data-type="cues"><ul class="ex-cues"><li>Solo 2 series</li><li>Dedo a dedo si lo estas introduciendo</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 La progresion de resistencia la marca el Dia A</div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=finger+extension+resistance+band+tennis+elbow" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc1" data-di="1" data-ei="2">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 4/10</span></div><div class="vid-edit-wrap" id="videdit-mc1-1-2"><input class="vid-edit-inp" id="vidinp-mc1-1-2" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc1" data-di="1" data-ei="2">Guardar</button><button class="btn-vid-cancel" data-mc="mc1" data-di="1" data-ei="2">Cancelar</button></div></div><div class="ex-card is-added"><div class="ex-head"><div class="ex-num">4</div><div class="ex-title-wrap"><div class="ex-name">Rebote con pala</div><span class="ex-focus-tag">Flexores/extensones</span></div><button class="btn-del" data-mc="mc1" data-di="1" data-ei="3" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc1_1_3_main" data-orig="3x20&quot; por lado"><span class="chip-label">3x20" por lado</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc1_1_3_tempo" data-orig="Mini rebotes"><span class="chip-label">Mini rebotes</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc1_1_3_load" data-orig="pelota padel"><span class="chip-label">pelota padel</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc1_1_3_vas" data-orig="VAS max 4/10"><span class="chip-label">VAS max 4/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc1-1-3"><div class="ex-desc" data-mc="mc1" data-di="1" data-ei="3" data-type="desc">Con pelota y pala iniciar mini rebotes
+20" palma arriba-20" palma abajo<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc1" data-di="1" data-ei="3" data-type="cues"><ul class="ex-cues"><li>Codo flexionado y cerca de las costillas</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Aumentar tiempo de rebote si no hay molestia VAS 2/10</div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=Rebote+con+pala" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc1" data-di="1" data-ei="3">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 4/10</span></div><div class="vid-edit-wrap" id="videdit-mc1-1-3"><input class="vid-edit-inp" id="vidinp-mc1-1-3" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc1" data-di="1" data-ei="3">Guardar</button><button class="btn-vid-cancel" data-mc="mc1" data-di="1" data-ei="3">Cancelar</button></div></div></div><button class="btn-add-ex" onclick="quickAdd('mc1',1)">➕ Añadir ejercicio aquí</button></div></div>
+    <div id="mc2" class="phase-panel"><div class="info-box ib-orange"><span class="ib-icon">ℹ️</span><div>Reducimos repeticiones y subimos carga. El tendon lleva 2 semanas de estimulo y esta preparado para mas.</div></div><div class="criteria"><div class="crit-card"><div class="crit-label">Criterio de entrada</div><div class="crit-value">VAS 24h menor/igual 3 en sem 1-2</div></div><div class="crit-card"><div class="crit-label">Carga minima</div><div class="crit-value">Extension muneca mayor/igual 1 kg</div></div><div class="crit-card"><div class="crit-label">VAS en reposo</div><div class="crit-value">0/10 siempre</div></div></div><div class="day-tabs" id="tabs-mc2"><button class="day-tab active" onclick="showDay('mc2',0)">Dia A <span style="font-weight:400;opacity:.6;font-size:11px">Ej: Lunes</span></button><button class="day-tab " onclick="showDay('mc2',1)">Dia B <span style="font-weight:400;opacity:.6;font-size:11px">Ej: Jueves</span></button></div><div id="day-mc2-0" style="display:block"><div class="day-label-bar"><span class="day-badge badge-a">Dia A</span><span class="day-freq">Ej: Lunes</span><span class="day-focus">Fuerza alta - microimpacto moderado</span></div><div class="ex-grid" id="grid-mc2-0"><div class="ex-card"><div class="ex-head"><div class="ex-num">1</div><div class="ex-title-wrap"><div class="ex-name">Extension de muneca - carga progresiva</div><span class="ex-focus-tag">Tendon extensor alta carga</span></div><button class="btn-del" data-mc="mc2" data-di="0" data-ei="0" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc2_0_0_main" data-orig="3 x 12 reps"><span class="chip-label">3 x 12 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc2_0_0_tempo" data-orig="Tempo 3-0-3"><span class="chip-label">Tempo 3-0-3</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc2_0_0_load" data-orig="1-1.5 kg"><span class="chip-label">1-1.5 kg</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc2_0_0_vas" data-orig="VAS max 4/10"><span class="chip-label">VAS max 4/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc2-0-0"><div class="ex-desc" data-mc="mc2" data-di="0" data-ei="0" data-type="desc">Mismo movimiento mas peso menos repeticiones. Las ultimas 3 reps deben ser un esfuerzo real (RPE 7/10).<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc2" data-di="0" data-ei="0" data-type="cues"><ul class="ex-cues"><li>Las ultimas 3 reps deben costarte RPE 7/10</li><li>3 minutos de descanso entre series</li><li>Anota el peso para controlar la progresion</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Objetivo semana 4: 3x10 con carga desafiante</div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=wrist+extension+heavy+slow+resistance+HSR" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc2" data-di="0" data-ei="0">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 4/10</span></div><div class="vid-edit-wrap" id="videdit-mc2-0-0"><input class="vid-edit-inp" id="vidinp-mc2-0-0" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc2" data-di="0" data-ei="0">Guardar</button><button class="btn-vid-cancel" data-mc="mc2" data-di="0" data-ei="0">Cancelar</button></div></div><div class="ex-card"><div class="ex-head"><div class="ex-num">2</div><div class="ex-title-wrap"><div class="ex-name">Extension dedos - goma media</div><span class="ex-focus-tag">Extensores de los dedos</span></div><button class="btn-del" data-mc="mc2" data-di="0" data-ei="1" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc2_0_1_main" data-orig="3 x 12 reps"><span class="chip-label">3 x 12 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc2_0_1_tempo" data-orig="Controlado"><span class="chip-label">Controlado</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc2_0_1_load" data-orig="Goma media"><span class="chip-label">Goma media</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc2_0_1_vas" data-orig="VAS max 4/10"><span class="chip-label">VAS max 4/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc2-0-1"><div class="ex-desc" data-mc="mc2" data-di="0" data-ei="1" data-type="desc">Goma de mayor resistencia. Extension dedo a dedo: indice, corazon, anular como parte fija de la sesion.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc2" data-di="0" data-ei="1" data-type="cues"><ul class="ex-cues"><li>Prueba cada dedo por separado</li><li>El corazon y el anular suelen ser los mas debiles</li><li>Compara ambas manos cada semana</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Goma alta cuando 3x12 sea comodo</div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=individual+finger+extension+resistance+hand+therapy" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc2" data-di="0" data-ei="1">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 4/10</span></div><div class="vid-edit-wrap" id="videdit-mc2-0-1"><input class="vid-edit-inp" id="vidinp-mc2-0-1" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc2" data-di="0" data-ei="1">Guardar</button><button class="btn-vid-cancel" data-mc="mc2" data-di="0" data-ei="1">Cancelar</button></div></div><div class="ex-card"><div class="ex-head"><div class="ex-num">3</div><div class="ex-title-wrap"><div class="ex-name">Tyler Twist adaptado - excentrico con goma</div><span class="ex-focus-tag">Estimulacion excentrica maxima</span></div><button class="btn-del" data-mc="mc2" data-di="0" data-ei="2" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc2_0_2_main" data-orig="3 x 12 reps"><span class="chip-label">3 x 12 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc2_0_2_tempo" data-orig="4-5 seg excentrico"><span class="chip-label">4-5 seg excentrico</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc2_0_2_load" data-orig="Goma media"><span class="chip-label">Goma media</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc2_0_2_vas" data-orig="VAS max 4/10"><span class="chip-label">VAS max 4/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc2-0-2"><div class="ex-desc" data-mc="mc2" data-di="0" data-ei="2" data-type="desc">La mano sana sube, la mano con dolor baja lentamente (4-5 seg). Evidencia: reduccion del 81% de dolor a 6 semanas.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc2" data-di="0" data-ei="2" data-type="cues"><ul class="ex-cues"><li>La subida: mano sana. La bajada: mano con dolor</li><li>Cuenta 4-5 seg bajando despacio</li><li>Con FlexBar: Tyler Twist; sin el: goma en polea o puerta</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Aumenta resistencia. Luego movimiento completo con mano afecta.</div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=tyler+twist+flexbar+eccentric+tennis+elbow" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc2" data-di="0" data-ei="2">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 4/10</span></div><div class="vid-edit-wrap" id="videdit-mc2-0-2"><input class="vid-edit-inp" id="vidinp-mc2-0-2" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc2" data-di="0" data-ei="2">Guardar</button><button class="btn-vid-cancel" data-mc="mc2" data-di="0" data-ei="2">Cancelar</button></div></div><div class="ex-card"><div class="ex-head"><div class="ex-num">4</div><div class="ex-title-wrap"><div class="ex-name">Agarre sostenido cronometrado</div><span class="ex-focus-tag">Resistencia del grip</span></div><button class="btn-del" data-mc="mc2" data-di="0" data-ei="3" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc2_0_3_main" data-orig="3 x 30 seg"><span class="chip-label">3 x 30 seg</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc2_0_3_tempo" data-orig="Sostenido"><span class="chip-label">Sostenido</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc2_0_3_load" data-orig="Agarre moderado-alto"><span class="chip-label">Agarre moderado-alto</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc2_0_3_vas" data-orig="VAS max 3/10"><span class="chip-label">VAS max 3/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc2-0-3"><div class="ex-desc" data-mc="mc2" data-di="0" data-ei="3" data-type="desc">Progresion desde los 20 seg. Cronometra fuerza constante.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc2" data-di="0" data-ei="3" data-type="cues"><ul class="ex-cues"><li>30 seg es mas de lo que parece</li><li>Fuerza constante durante todo el tiempo</li><li>Si dolor mas de 3/10 antes de los 30 seg para</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 30 seg - 45 - 60 seg</div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=grip+endurance+isometric+racket+sport" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc2" data-di="0" data-ei="3">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 3/10</span></div><div class="vid-edit-wrap" id="videdit-mc2-0-3"><input class="vid-edit-inp" id="vidinp-mc2-0-3" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc2" data-di="0" data-ei="3">Guardar</button><button class="btn-vid-cancel" data-mc="mc2" data-di="0" data-ei="3">Cancelar</button></div></div><div class="ex-card is-impact"><div class="ex-head"><div class="ex-num">5</div><div class="ex-title-wrap"><div class="ex-name">Pica + peso en goma - impacto moderado</div><span class="ex-focus-tag">Microimpacto moderado</span></div><button class="btn-del" data-mc="mc2" data-di="0" data-ei="4" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc2_0_4_main" data-orig="2 x 8 reps"><span class="chip-label">2 x 8 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc2_0_4_tempo" data-orig="Controlado"><span class="chip-label">Controlado</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc2_0_4_load" data-orig="500g caida 20cm"><span class="chip-label">500g caida 20cm</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc2_0_4_vas" data-orig="VAS max 4/10"><span class="chip-label">VAS max 4/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc2-0-4"><div class="ex-desc" data-mc="mc2" data-di="0" data-ei="4" data-type="desc">Altura aumentada a 20 cm. Menor volumen que Dia B. El enfasis sigue siendo la fuerza.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc2" data-di="0" data-ei="4" data-type="cues"><ul class="ex-cues"><li>Altura 20 cm</li><li>2 series solo; el dia de impacto maximo es el Dia B</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Dia B esta semana: 3x10 a 25 cm</div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=wrist+roller+drop+forearm+plyometric+tendinopathy" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc2" data-di="0" data-ei="4">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 4/10</span></div><div class="vid-edit-wrap" id="videdit-mc2-0-4"><input class="vid-edit-inp" id="vidinp-mc2-0-4" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc2" data-di="0" data-ei="4">Guardar</button><button class="btn-vid-cancel" data-mc="mc2" data-di="0" data-ei="4">Cancelar</button></div></div></div><button class="btn-add-ex" onclick="quickAdd('mc2',0)">➕ Añadir ejercicio aquí</button></div><div id="day-mc2-1" style="display:none"><div class="day-label-bar"><span class="day-badge badge-b">Dia B</span><span class="day-freq">Ej: Jueves</span><span class="day-focus">Microimpacto progresivo - fuerza de apoyo</span></div><div class="ex-grid" id="grid-mc2-1"><div class="ex-card is-impact"><div class="ex-head"><div class="ex-num">1</div><div class="ex-title-wrap"><div class="ex-name">Pica + peso en goma - microimpacto progresivo</div><span class="ex-focus-tag">Adaptacion al impacto progresion</span></div><button class="btn-del" data-mc="mc2" data-di="1" data-ei="0" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc2_1_0_main" data-orig="3 x 10 reps"><span class="chip-label">3 x 10 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc2_1_0_tempo" data-orig="Controlado"><span class="chip-label">Controlado</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc2_1_0_load" data-orig="500g-1kg caida 25cm"><span class="chip-label">500g-1kg caida 25cm</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc2_1_0_vas" data-orig="VAS max 4/10"><span class="chip-label">VAS max 4/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc2-1-0"><div class="ex-desc" data-mc="mc2" data-di="1" data-ei="0" data-type="desc">Altura aumentada a 25 cm mas peso. El impacto es claramente mayor.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc2" data-di="1" data-ei="0" data-type="cues"><ul class="ex-cues"><li>Altura 25 cm</li><li>Si hay inseguridad empieza en 20 cm</li><li>Tension en codo: normal si menor/igual 4/10</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Sem 5: 30-35 cm. Sem 5b: unilateral con 20 cm.</div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=reactive+loading+forearm+tendinopathy+plyometric" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc2" data-di="1" data-ei="0">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 4/10</span></div><div class="vid-edit-wrap" id="videdit-mc2-1-0"><input class="vid-edit-inp" id="vidinp-mc2-1-0" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc2" data-di="1" data-ei="0">Guardar</button><button class="btn-vid-cancel" data-mc="mc2" data-di="1" data-ei="0">Cancelar</button></div></div><div class="ex-card"><div class="ex-head"><div class="ex-num">2</div><div class="ex-title-wrap"><div class="ex-name">Extension de muneca - soporte Dia B</div><span class="ex-focus-tag">Tendon extensor mantenimiento</span></div><button class="btn-del" data-mc="mc2" data-di="1" data-ei="1" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc2_1_1_main" data-orig="2 x 10 reps"><span class="chip-label">2 x 10 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc2_1_1_tempo" data-orig="Tempo 3-0-3"><span class="chip-label">Tempo 3-0-3</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc2_1_1_load" data-orig="Igual que Dia A"><span class="chip-label">Igual que Dia A</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc2_1_1_vas" data-orig="VAS max 4/10"><span class="chip-label">VAS max 4/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc2-1-1"><div class="ex-desc" data-mc="mc2" data-di="1" data-ei="1" data-type="desc">2 series de mantenimiento. La carga de Dia A es la referencia.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc2" data-di="1" data-ei="1" data-type="cues"><ul class="ex-cues"><li>Misma carga que en Dia A</li><li>No progreses aqui la progresion es en Dia A</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=wrist+extension+eccentric+dumbbell" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc2" data-di="1" data-ei="1">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 4/10</span></div><div class="vid-edit-wrap" id="videdit-mc2-1-1"><input class="vid-edit-inp" id="vidinp-mc2-1-1" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc2" data-di="1" data-ei="1">Guardar</button><button class="btn-vid-cancel" data-mc="mc2" data-di="1" data-ei="1">Cancelar</button></div></div><div class="ex-card"><div class="ex-head"><div class="ex-num">3</div><div class="ex-title-wrap"><div class="ex-name">Pronosupinacion cargada</div><span class="ex-focus-tag">Estabilizadores del codo</span></div><button class="btn-del" data-mc="mc2" data-di="1" data-ei="2" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc2_1_2_main" data-orig="3 x 12 reps"><span class="chip-label">3 x 12 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc2_1_2_tempo" data-orig="2-0-2"><span class="chip-label">2-0-2</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc2_1_2_load" data-orig="1 kg"><span class="chip-label">1 kg</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc2_1_2_vas" data-orig="VAS max 3/10"><span class="chip-label">VAS max 3/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc2-1-2"><div class="ex-desc" data-mc="mc2" data-di="1" data-ei="2" data-type="desc">Misma mecanica que en Microciclo 1 pero con ligeramente mas peso.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc2" data-di="1" data-ei="2" data-type="cues"><ul class="ex-cues"><li>Codo pegado al cuerpo</li><li>Rango completo</li><li>Progresa si 3x12 resulta facil</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Sube a 1.5 kg si 3x12 no supera RPE 5</div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=pronation+supination+forearm+exercise" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc2" data-di="1" data-ei="2">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 3/10</span></div><div class="vid-edit-wrap" id="videdit-mc2-1-2"><input class="vid-edit-inp" id="vidinp-mc2-1-2" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc2" data-di="1" data-ei="2">Guardar</button><button class="btn-vid-cancel" data-mc="mc2" data-di="1" data-ei="2">Cancelar</button></div></div><div class="ex-card"><div class="ex-head"><div class="ex-num">4</div><div class="ex-title-wrap"><div class="ex-name">Diagonal D2 introductoria - patron del golpe</div><span class="ex-focus-tag">Cadena cinetica del golpe de padel</span></div><button class="btn-del" data-mc="mc2" data-di="1" data-ei="3" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc2_1_3_main" data-orig="3 x 12 reps"><span class="chip-label">3 x 12 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc2_1_3_tempo" data-orig="Fluido"><span class="chip-label">Fluido</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc2_1_3_load" data-orig="Goma baja-media"><span class="chip-label">Goma baja-media</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc2_1_3_vas" data-orig="VAS max 3/10"><span class="chip-label">VAS max 3/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc2-1-3"><div class="ex-desc" data-mc="mc2" data-di="1" data-ei="3" data-type="desc">Movimiento diagonal que imita el golpe de padel. Bilateral primero.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc2" data-di="1" data-ei="3" data-type="cues"><ul class="ex-cues"><li>Movimiento fluido como el golpe real</li><li>Bilateral las primeras sesiones</li><li>Trabaja tanto derecha como reves</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Unilateral afecto en Microciclo 3</div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=PNF+diagonal+D2+shoulder+arm+padel+tennis+rehab" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc2" data-di="1" data-ei="3">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 3/10</span></div><div class="vid-edit-wrap" id="videdit-mc2-1-3"><input class="vid-edit-inp" id="vidinp-mc2-1-3" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc2" data-di="1" data-ei="3">Guardar</button><button class="btn-vid-cancel" data-mc="mc2" data-di="1" data-ei="3">Cancelar</button></div></div></div><button class="btn-add-ex" onclick="quickAdd('mc2',1)">➕ Añadir ejercicio aquí</button></div></div>
+    <div id="mc3" class="phase-panel"><div class="info-box ib-green"><span class="ib-icon">ℹ️</span><div>El tendon esta preparado para cargas deportivas. Introducimos el padel de forma progresiva. Sigue haciendo los ejercicios de fuerza aunque ya estes jugando.</div></div><div class="criteria"><div class="crit-card"><div class="crit-label">VAS 24h post-ejercicio</div><div class="crit-value">Menor/igual 3/10 constante</div></div><div class="crit-card"><div class="crit-label">VAS en reposo</div><div class="crit-value">0/10 siempre</div></div><div class="crit-card"><div class="crit-label">Fuerza agarre afecto/sano</div><div class="crit-value">Mayor/igual 75%</div></div></div><div class="day-tabs" id="tabs-mc3"><button class="day-tab active" onclick="showDay('mc3',0)">Dia A <span style="font-weight:400;opacity:.6;font-size:11px">Ej: Lunes</span></button><button class="day-tab " onclick="showDay('mc3',1)">Dia B <span style="font-weight:400;opacity:.6;font-size:11px">Ej: Jueves</span></button></div><div id="day-mc3-0" style="display:block"><div class="day-label-bar"><span class="day-badge badge-a">Dia A</span><span class="day-freq">Ej: Lunes</span><span class="day-focus">Carga maxima - microimpacto moderado</span></div><div class="ex-grid" id="grid-mc3-0"><div class="ex-card"><div class="ex-head"><div class="ex-num">1</div><div class="ex-title-wrap"><div class="ex-name">Extension de muneca - zona de alta carga</div><span class="ex-focus-tag">Fuerza maxima del tendon</span></div><button class="btn-del" data-mc="mc3" data-di="0" data-ei="0" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc3_0_0_main" data-orig="4 x 8-10 reps"><span class="chip-label">4 x 8-10 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc3_0_0_tempo" data-orig="Tempo 3-0-3"><span class="chip-label">Tempo 3-0-3</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc3_0_0_load" data-orig="RPE 7-8/10"><span class="chip-label">RPE 7-8/10</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc3_0_0_vas" data-orig="VAS max 4/10"><span class="chip-label">VAS max 4/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc3-0-0"><div class="ex-desc" data-mc="mc3" data-di="0" data-ei="0" data-type="desc">Carga maxima tolerable con buena tecnica. Las ultimas 2 reps deben ser un esfuerzo serio. 3 min de descanso.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc3" data-di="0" data-ei="0" data-type="cues"><ul class="ex-cues"><li>Si haces 10 reps facil el peso es demasiado bajo</li><li>3 min de descanso entre series</li><li>Ajusta el peso segun como te encuentres</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Mantener 2x/semana indefinidamente previene la recaida</div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=wrist+extension+maximum+load+tendinopathy+strength" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc3" data-di="0" data-ei="0">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 4/10</span></div><div class="vid-edit-wrap" id="videdit-mc3-0-0"><input class="vid-edit-inp" id="vidinp-mc3-0-0" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc3" data-di="0" data-ei="0">Guardar</button><button class="btn-vid-cancel" data-mc="mc3" data-di="0" data-ei="0">Cancelar</button></div></div><div class="ex-card"><div class="ex-head"><div class="ex-num">2</div><div class="ex-title-wrap"><div class="ex-name">Extension dedos - carga alta</div><span class="ex-focus-tag">Fuerza extensora de los dedos</span></div><button class="btn-del" data-mc="mc3" data-di="0" data-ei="1" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc3_0_1_main" data-orig="4 x 10 reps"><span class="chip-label">4 x 10 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc3_0_1_tempo" data-orig="3-0-3"><span class="chip-label">3-0-3</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc3_0_1_load" data-orig="Goma alta resistencia"><span class="chip-label">Goma alta resistencia</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc3_0_1_vas" data-orig="VAS max 4/10"><span class="chip-label">VAS max 4/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc3-0-1"><div class="ex-desc" data-mc="mc3" data-di="0" data-ei="1" data-type="desc">Maxima resistencia. Objetivo: fuerza equivalente entre ambas manos antes del retorno al padel.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc3" data-di="0" data-ei="1" data-type="cues"><ul class="ex-cues"><li>Compara ambas manos cada semana deben ser similares</li><li>Extension completa en cada rep</li><li>Dedo a dedo si hay diferencias</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Simetria bilateral es el criterio de retorno</div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=finger+extension+high+resistance+sport+return" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc3" data-di="0" data-ei="1">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 4/10</span></div><div class="vid-edit-wrap" id="videdit-mc3-0-1"><input class="vid-edit-inp" id="vidinp-mc3-0-1" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc3" data-di="0" data-ei="1">Guardar</button><button class="btn-vid-cancel" data-mc="mc3" data-di="0" data-ei="1">Cancelar</button></div></div><div class="ex-card"><div class="ex-head"><div class="ex-num">3</div><div class="ex-title-wrap"><div class="ex-name">Diagonal D2 unilateral afecto (Kabat)</div><span class="ex-focus-tag">Cadena cinetica completa</span></div><button class="btn-del" data-mc="mc3" data-di="0" data-ei="2" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc3_0_2_main" data-orig="3 x 12 reps"><span class="chip-label">3 x 12 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc3_0_2_tempo" data-orig="Fluido velocidad creciente"><span class="chip-label">Fluido velocidad creciente</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc3_0_2_load" data-orig="Goma media-alta"><span class="chip-label">Goma media-alta</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc3_0_2_vas" data-orig="VAS max 3/10"><span class="chip-label">VAS max 3/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc3-0-2"><div class="ex-desc" data-mc="mc3" data-di="0" data-ei="2" data-type="desc">Solo con el brazo afecto. Velocidad creciente semana a semana. Trabaja patron de derecha y reves.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc3" data-di="0" data-ei="2" data-type="cues"><ul class="ex-cues"><li>Aumenta la velocidad gradualmente: simula el juego real</li><li>Patron de derecha y de reves</li><li>Resistencia creciente de la goma</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Aumenta velocidad y resistencia</div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=PNF+diagonal+D2+unilateral+padel+tennis+return" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc3" data-di="0" data-ei="2">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 3/10</span></div><div class="vid-edit-wrap" id="videdit-mc3-0-2"><input class="vid-edit-inp" id="vidinp-mc3-0-2" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc3" data-di="0" data-ei="2">Guardar</button><button class="btn-vid-cancel" data-mc="mc3" data-di="0" data-ei="2">Cancelar</button></div></div><div class="ex-card"><div class="ex-head"><div class="ex-num">4</div><div class="ex-title-wrap"><div class="ex-name">Rotacion externa de hombro</div><span class="ex-focus-tag">Manguito rotador - control del golpe</span></div><button class="btn-del" data-mc="mc3" data-di="0" data-ei="3" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc3_0_3_main" data-orig="3 x 15 reps"><span class="chip-label">3 x 15 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc3_0_3_tempo" data-orig="2-0-2"><span class="chip-label">2-0-2</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc3_0_3_load" data-orig="Goma media"><span class="chip-label">Goma media</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc3_0_3_vas" data-orig="VAS max 3/10"><span class="chip-label">VAS max 3/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc3-0-3"><div class="ex-desc" data-mc="mc3" data-di="0" data-ei="3" data-type="desc">Codo 90 grados pegado al cuerpo. Rotacion externa resistida con goma. Fundamental para el control del hombro.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc3" data-di="0" data-ei="3" data-type="cues"><ul class="ex-cues"><li>Codo pegado al cuerpo en todo momento</li><li>Rango completo de rotacion</li><li>Fortalece infraespinoso y redondo menor</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Goma alta si 3x15 no supera RPE 5</div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=shoulder+external+rotation+resistance+band+exercise" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc3" data-di="0" data-ei="3">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 3/10</span></div><div class="vid-edit-wrap" id="videdit-mc3-0-3"><input class="vid-edit-inp" id="vidinp-mc3-0-3" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc3" data-di="0" data-ei="3">Guardar</button><button class="btn-vid-cancel" data-mc="mc3" data-di="0" data-ei="3">Cancelar</button></div></div><div class="ex-card is-impact"><div class="ex-head"><div class="ex-num">5</div><div class="ex-title-wrap"><div class="ex-name">Pica + peso en goma - microimpacto Dia A</div><span class="ex-focus-tag">Microimpacto volumen controlado</span></div><button class="btn-del" data-mc="mc3" data-di="0" data-ei="4" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc3_0_4_main" data-orig="2 x 8 reps"><span class="chip-label">2 x 8 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc3_0_4_tempo" data-orig="Controlado"><span class="chip-label">Controlado</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc3_0_4_load" data-orig="1kg caida 30cm"><span class="chip-label">1kg caida 30cm</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc3_0_4_vas" data-orig="VAS max 4/10"><span class="chip-label">VAS max 4/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc3-0-4"><div class="ex-desc" data-mc="mc3" data-di="0" data-ei="4" data-type="desc">En el Dia A el microimpacto tiene menor volumen. Altura 30 cm ya establecida.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc3" data-di="0" data-ei="4" data-type="cues"><ul class="ex-cues"><li>2 series solo</li><li>Altura 30 cm ya bien establecida</li><li>Dia B es donde el impacto sera maximo</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Dia B: posible unilateral a 15-20 cm</div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=wrist+roller+drop+forearm+plyometric" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc3" data-di="0" data-ei="4">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 4/10</span></div><div class="vid-edit-wrap" id="videdit-mc3-0-4"><input class="vid-edit-inp" id="vidinp-mc3-0-4" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc3" data-di="0" data-ei="4">Guardar</button><button class="btn-vid-cancel" data-mc="mc3" data-di="0" data-ei="4">Cancelar</button></div></div></div><button class="btn-add-ex" onclick="quickAdd('mc3',0)">➕ Añadir ejercicio aquí</button></div><div id="day-mc3-1" style="display:none"><div class="day-label-bar"><span class="day-badge badge-b">Dia B</span><span class="day-freq">Ej: Jueves</span><span class="day-focus">Microimpacto maximo - retorno al padel</span></div><div class="ex-grid" id="grid-mc3-1"><div class="ex-card is-impact"><div class="ex-head"><div class="ex-num">1</div><div class="ex-title-wrap"><div class="ex-name">Pica + peso en goma - microimpacto pleno</div><span class="ex-focus-tag">Adaptacion maxima al impacto</span></div><button class="btn-del" data-mc="mc3" data-di="1" data-ei="0" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc3_1_0_main" data-orig="3 x 10 reps"><span class="chip-label">3 x 10 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc3_1_0_tempo" data-orig="Progresivo"><span class="chip-label">Progresivo</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc3_1_0_load" data-orig="1-1.5kg caida 30-35cm"><span class="chip-label">1-1.5kg caida 30-35cm</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc3_1_0_vas" data-orig="VAS max 4/10"><span class="chip-label">VAS max 4/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc3-1-0"><div class="ex-desc" data-mc="mc3" data-di="1" data-ei="0" data-type="desc">Altura maxima y peso maximo del programa. Si la respuesta es buena prueba unilateral comenzando con 15-20 cm.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc3" data-di="1" data-ei="0" data-type="cues"><ul class="ex-cues"><li>Si va unilateral empieza en 15-20 cm</li><li>El impacto unilateral es notablemente mayor</li><li>Esta es la ultima progresion antes del golpe real</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Retorno al padel cuando dolor 24h menor/igual 3 de forma consistente</div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=unilateral+plyometric+wrist+extension+tendinopathy+sport" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc3" data-di="1" data-ei="0">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 4/10</span></div><div class="vid-edit-wrap" id="videdit-mc3-1-0"><input class="vid-edit-inp" id="vidinp-mc3-1-0" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc3" data-di="1" data-ei="0">Guardar</button><button class="btn-vid-cancel" data-mc="mc3" data-di="1" data-ei="0">Cancelar</button></div></div><div class="ex-card"><div class="ex-head"><div class="ex-num">2</div><div class="ex-title-wrap"><div class="ex-name">Extension muneca - soporte Dia B final</div><span class="ex-focus-tag">Mantenimiento de fuerza</span></div><button class="btn-del" data-mc="mc3" data-di="1" data-ei="1" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc3_1_1_main" data-orig="2 x 8 reps"><span class="chip-label">2 x 8 reps</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc3_1_1_tempo" data-orig="Tempo 3-0-3"><span class="chip-label">Tempo 3-0-3</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc3_1_1_load" data-orig="Carga alta igual Dia A"><span class="chip-label">Carga alta igual Dia A</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc3_1_1_vas" data-orig="VAS max 4/10"><span class="chip-label">VAS max 4/10</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc3-1-1"><div class="ex-desc" data-mc="mc3" data-di="1" data-ei="1" data-type="desc">2 series de mantenimiento con la carga maxima.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc3" data-di="1" data-ei="1" data-type="cues"><ul class="ex-cues"><li>2 series con la carga del Dia A</li><li>Si el microimpacto te tiene muy fatigada reduce 0.5 kg</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=wrist+extension+eccentric+dumbbell" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc3" data-di="1" data-ei="1">✎ Mi vídeo</button><span class="vas-badge">Max VAS max 4/10</span></div><div class="vid-edit-wrap" id="videdit-mc3-1-1"><input class="vid-edit-inp" id="vidinp-mc3-1-1" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc3" data-di="1" data-ei="1">Guardar</button><button class="btn-vid-cancel" data-mc="mc3" data-di="1" data-ei="1">Cancelar</button></div></div><div class="ex-card"><div class="ex-head"><div class="ex-num">3</div><div class="ex-title-wrap"><div class="ex-name">Peloteo progresivo en pista</div><span class="ex-focus-tag">Retorno al padel</span></div><button class="btn-del" data-mc="mc3" data-di="1" data-ei="2" title="Eliminar ejercicio">✕</button></div><div class="ex-dose"><span class="chip chip-main" data-key="dose_mc3_1_2_main" data-orig="15-40 min"><span class="chip-label">15-40 min</span><input type="text" placeholder="main"><span class="chip-hint">✎</span></span><span class="chip chip-tempo" data-key="dose_mc3_1_2_tempo" data-orig="Dias alternos"><span class="chip-label">Dias alternos</span><input type="text" placeholder="tempo"><span class="chip-hint">✎</span></span><span class="chip chip-load" data-key="dose_mc3_1_2_load" data-orig="Sin smash todavia"><span class="chip-label">Sin smash todavia</span><input type="text" placeholder="load"><span class="chip-hint">✎</span></span><span class="chip chip-vas" data-key="dose_mc3_1_2_vas" data-orig="VAS 24h menor/igual 3"><span class="chip-label">VAS 24h menor/igual 3</span><input type="text" placeholder="vas"><span class="chip-hint">✎</span></span></div><div class="ex-body" id="body-mc3-1-2"><div class="ex-desc" data-mc="mc3" data-di="1" data-ei="2" data-type="desc">Sem 5: pared solo derecha 15 min. Sem 5b: anadir reves. Sem 6: partido corto. Sem 6b: retorno completo si VAS 24h post-partido menor/igual 2 dos sesiones seguidas.<div class="edit-hint-txt">✎ Clic para editar descripcion</div></div><div class="ex-cues-wrap" data-mc="mc3" data-di="1" data-ei="2" data-type="cues"><ul class="ex-cues"><li>No smash hasta VAS 24h menor/igual 2 constante</li><li>Si dolor mayor de 4 post-padel retrocede un paso</li><li>Sigue los ejercicios de fuerza aunque juegues</li><li>El mantenimiento 2x/semana es tu seguro contra la recaida</li></ul><div class="edit-hint-txt">✎ Clic para editar puntos clave (uno por linea)</div></div><div class="ex-prog">📈 Retorno completo: VAS 24h post-partido menor/igual 2 en 2 sesiones seguidas</div></div><div class="ex-foot"><a class="btn-yt-search" href="https://www.youtube.com/results?search_query=return+padel+tennis+elbow+lateral+epicondylalgia+sport" target="_blank" rel="noopener">▶ Buscar vídeo</a><button class="btn-vid-edit" data-mc="mc3" data-di="1" data-ei="2">✎ Mi vídeo</button><span class="vas-badge">Max VAS 24h menor/igual 3</span></div><div class="vid-edit-wrap" id="videdit-mc3-1-2"><input class="vid-edit-inp" id="vidinp-mc3-1-2" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)"><button class="btn-vid-save" data-mc="mc3" data-di="1" data-ei="2">Guardar</button><button class="btn-vid-cancel" data-mc="mc3" data-di="1" data-ei="2">Cancelar</button></div></div></div><button class="btn-add-ex" onclick="quickAdd('mc3',1)">➕ Añadir ejercicio aquí</button></div></div>
+  </div>
+  <div id="tab-add" style="display:none">
+    <div class="info-box ib-blue" style="margin-bottom:20px">
+      <span class="ib-icon">ℹ️</span>
+      <div>Rellena el formulario y pulsa <strong>Añadir ejercicio</strong>. Después usa <strong>Exportar para paciente</strong> para guardar los cambios.</div>
+    </div>
+    <div class="add-form-wrap">
+      <div class="fg-row fg-2">
+        <div class="fg"><label>Microciclo</label>
+          <select id="add-mc">
+            <option value="mc1">Microciclo 1 — Semanas 1-2</option>
+            <option value="mc2">Microciclo 2 — Semanas 3-4</option>
+            <option value="mc3">Microciclo 3 — Semanas 5-6</option>
+          </select>
+        </div>
+        <div class="fg"><label>Día</label>
+          <select id="add-day">
+            <option value="0">Día A (fuerza predominante)</option>
+            <option value="1">Día B (impacto predominante)</option>
+          </select>
+        </div>
+      </div>
+      <div class="fg"><label>Nombre del ejercicio <span style="color:var(--red)">*</span></label>
+        <input type="text" id="add-name" placeholder="ej. Curl de muñeca en pronación">
+      </div>
+      <div class="fg-row fg-2">
+        <div class="fg"><label>Etiqueta / enfoque</label>
+          <input type="text" id="add-focus" placeholder="ej. Flexores de muñeca">
+        </div>
+        <div class="fg"><label>ID de vídeo YouTube</label>
+          <input type="text" id="add-video" placeholder="ej. dQw4w9WgXcQ">
+          <span class="hint">Parte de la URL después de v=</span>
+        </div>
+      </div>
+      <div class="fg-row fg-4">
+        <div class="fg"><label>Series x Reps</label><input type="text" id="add-main" placeholder="3 x 12 reps"></div>
+        <div class="fg"><label>Tempo</label><input type="text" id="add-tempo" placeholder="3-0-3"></div>
+        <div class="fg"><label>Carga</label><input type="text" id="add-load" placeholder="1-1.5 kg"></div>
+        <div class="fg"><label>VAS máx</label><input type="text" id="add-vas" placeholder="VAS 4/10"></div>
+      </div>
+      <div class="fg"><label>Descripción para la paciente</label>
+        <textarea id="add-desc" placeholder="Explica el ejercicio en lenguaje sencillo..."></textarea>
+      </div>
+      <div class="fg"><label>Puntos clave <span style="color:var(--text3)">(uno por línea)</span></label>
+        <textarea id="add-cues" placeholder="Antebrazo apoyado
+Bajar lentamente 3 seg
+No compensar con el hombro"></textarea>
+      </div>
+      <div class="fg"><label>Nota de progresión</label>
+        <input type="text" id="add-prog" placeholder="ej. Sube 0.5 kg cuando 3x12 sea facil">
+      </div>
+      <div class="check-row">
+        <input type="checkbox" id="add-impact">
+        <label for="add-impact">Ejercicio de microimpacto (borde naranja)</label>
+      </div>
+      <div class="form-actions">
+        <button class="btn-cancel" onclick="clearAddForm()">Limpiar</button>
+        <button class="btn-submit" onclick="addExercise()">Añadir ejercicio →</button>
+      </div>
+    </div>
+  </div>
+  <div id="tab-rules" style="display:none">
+    <div class="rules-card">
+      <div class="rules-hdr">🚦 Reglas del dolor — ¿Cómo sé si voy bien?</div>
+      <div class="rule-row"><div class="rule-dot dot-g">✓</div>
+        <div class="rule-body"><strong>VERDE — Continúa:</strong> Dolor durante el ejercicio ≤ 4/10 Y dolor a las 24h ≤ 3/10. Respuesta perfecta.</div></div>
+      <div class="rule-row"><div class="rule-dot dot-y">~</div>
+        <div class="rule-body"><strong>AMARILLO — Mantén, no subas:</strong> Dolor 24h entre 3–5/10. No aumentes carga esta semana. Si persiste 2 días, contacta.</div></div>
+      <div class="rule-row"><div class="rule-dot dot-r">!</div>
+        <div class="rule-body"><strong>ROJO — Reduce y contacta:</strong> Dolor 24h &gt; 5/10 o dolor en reposo. Reduce el peso un 30%.</div></div>
+    </div>
+    <div class="info-box ib-green"><span class="ib-icon">💡</span>
+      <div>Es <strong>completamente normal</strong> sentir molestia moderada (≤4/10). El tendón necesita carga. Lo importante es la respuesta a las 24 horas.</div></div>
+    <div class="info-box ib-red"><span class="ib-icon">📞</span>
+      <div><strong>Contacta si:</strong> dolor en reposo o nocturno, dolor &gt; 6/10 continuado, hormigueo, o el dolor empeora semana a semana.</div></div>
+  </div>
+  <div id="tab-vas" style="display:none">
+    <div class="info-box ib-blue" style="margin-bottom:14px"><span class="ib-icon">ℹ️</span>
+      <div>Anota tu dolor del <strong>0 al 10</strong> en cuatro momentos cada semana. Los datos se guardan automáticamente.</div></div>
+    <div class="vas-table-wrap">
+      <table class="vas-table"><thead><tr>
+        <th class="left">Momento</th>
+        <th>Sem 1</th><th>Sem 2</th><th>Sem 3</th><th>Sem 4</th><th>Sem 5</th><th>Sem 6</th>
+      </tr></thead><tbody id="vasBody"><tr><td>😴 En reposo</td><td><input class="vas-inp cv0" type="number" min="0" max="10" step="0.5" data-key="rest-1" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="rest-2" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="rest-3" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="rest-4" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="rest-5" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="rest-6" oninput="saveVas(this)" placeholder="—"></td></tr><tr><td>🏋 Durante el ejercicio</td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="ex-1" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="ex-2" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="ex-3" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="ex-4" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="ex-5" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="ex-6" oninput="saveVas(this)" placeholder="—"></td></tr><tr><td>⌛ 24h post-ejercicio</td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="post-1" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="post-2" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="post-3" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="post-4" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="post-5" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="post-6" oninput="saveVas(this)" placeholder="—"></td></tr><tr><td>🎾 24h post-padel</td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="padel-1" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="padel-2" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="padel-3" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="padel-4" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="padel-5" oninput="saveVas(this)" placeholder="—"></td><td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="padel-6" oninput="saveVas(this)" placeholder="—"></td></tr></tbody></table>
+    </div>
+    <div class="legend">
+      <div class="leg-item"><div class="leg-dot" style="background:#C8E6C9"></div>0 Sin dolor</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#DCEDC8"></div>1-3 Leve</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#FFF9C4"></div>4 Límite</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#FFE0B2"></div>5-6 Revisar</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#FFCDD2"></div>7+ Contactar</div>
+    </div>
+    <div class="btn-row">
+      <button class="btn-outline" onclick="exportVasCSV()">📄 Exportar datos VAS</button>
+      <button class="btn-outline btn-danger" onclick="clearVas()">🗑 Borrar registros</button>
+    </div>
+  </div>
+</div></main>
+<footer><div class="container"><strong id="foot-clinician">Fisioterapeuta - Clinica</strong> · Programa personalizado · <span id="foot-date">mayo de 2026</span></div></footer>
+<div class="vid-bg" id="vidModal">
+  <div class="vid-box">
+    <button class="vid-close" onclick="closeVid()">✕</button>
+    <iframe id="vidFrame" src="" allowfullscreen=""></iframe>
+  </div>
+</div>
+<script>
+var CONFIG = {
+  patient:   'Sonia Riera',
+  diagnosis: 'Tendinopatia extensor comun - Codo derecho',
+  clinician: 'Fisioterapeuta - Clinica'
+};
+/* @@DATA_START@@ */
+var PDATA = [
+  {
+    "id": "mc1",
+    "label": "Microciclo 1 - Fuerza base",
+    "weeks": "Semanas 1-2",
+    "cls": "mc1",
+    "info": "Iniciamos la carga mecanica. Ambos dias contienen fuerza y microimpacto con diferente enfasis. Es normal sentir hasta 4/10 de dolor durante los ejercicios.",
+    "itype": "ib-blue",
+    "criteria": null,
+    "days": [
+      {
+        "label": "Dia A",
+        "bcls": "badge-a",
+        "freq": "Ej: Lunes",
+        "focus": "Fuerza predominante - microimpacto ligero",
+        "exs": [
+          {
+            "name": "Extension de muneca con mancuerna",
+            "focus": "Tendon extensor principal",
+            "dose": {
+              "main": "3 x 10 reps",
+              "tempo": "Tempo 3-0-3",
+              "load": "3kg",
+              "vas": "VAS max 4/10"
+            },
+            "desc": "Antebrazo apoyado, muneca al borde, palma abajo. Sube 3 seg, pausa 0, baja 3 seg. Rango de movimiento completo.",
+            "cues": [
+              "Antebrazo completamente apoyado en todo momento",
+              "La bajada lenta (3 seg) es la fase mas importante",
+              "No compensar con el hombro",
+              "Si superas 4/10 reduce el peso",
+              "Sube 1kg si completas las reps con dolor 24h menor o igual a 3"
+            ],
+            "prog": "Sube 0.5 kg cuando completes 3x15 con dolor 24h menor o igual a 3",
+            "vid": "_CELm_fI4TI",
+            "vsearch": "wrist+extension+eccentric+dumbbell+lateral+epicondylalgia"
+          },
+          {
+            "name": "Extension resistida de dedos",
+            "focus": "Extensores de los dedos",
+            "dose": {
+              "main": "3 x 10 reps",
+              "tempo": "Controlado",
+              "load": "Goma fina",
+              "vas": "VAS max 4/10"
+            },
+            "desc": "Goma fina en los 4 dedos sin pulgar. Abre hasta extension completa, vuelve lentamente. Prueba tambien dedo a dedo.",
+            "cues": [
+              "Muneca en posicion neutra",
+              "Extension completa en cada repeticion",
+              "Vuelta lenta no soltar de golpe",
+              "Prueba dedo a dedo: indice, corazon, anular"
+            ],
+            "prog": "Aumenta la resistencia cuando 3x15 sea sencillo",
+            "vid": "lJWfnYKr6qo",
+            "vsearch": "finger+extension+resistance+band+tennis+elbow"
+          },
+          {
+            "name": "Prension dinamica - variaciones de agarre",
+            "focus": "Fuerza de grip (pala de padel)",
+            "dose": {
+              "main": "3 x 15 reps",
+              "tempo": "2-1-2",
+              "load": "Barra / pelota",
+              "vas": "VAS max 4/10"
+            },
+            "desc": "Agarre esferico amplio. Tres tipos: cilindrico barra, pinza pulgar+indice, esferico pelota de tenis.",
+            "cues": [
+              "Usa algo con el grosor de la mano",
+              "Apreton maximo 2 seg suelta despacio",
+              "Sin superar 4/10 de dolor"
+            ],
+            "prog": "Aumenta diametro o peso progresivamente",
+            "vid": "5rwHzUzm1hE",
+            "vsearch": "grip+strength+racket+sport+tennis+elbow"
+          },
+          {
+            "name": "Pronosupinacion cargada",
+            "focus": "Estabilizadores del codo",
+            "dose": {
+              "main": "3 x 12 reps",
+              "tempo": "2-0-2",
+              "load": "0.5-1 kg",
+              "vas": "VAS max 3/10"
+            },
+            "desc": "Codo 90 grados pegado al cuerpo. Gira desde palma arriba (supinacion) hasta palma abajo (pronacion). Rango completo.",
+            "cues": [
+              "Codo pegado al cuerpo en todo momento",
+              "Rango completo palma arriba hasta palma abajo",
+              "Movimiento lento y controlado"
+            ],
+            "prog": "Sube 0.5 kg cuando 3x12 sea comodo",
+            "vid": "uha1KQRagpI",
+            "vsearch": "pronation+supination+forearm+exercise+tennis+elbow"
+          },
+          {
+            "name": "Pica + peso en goma - impacto ligero",
+            "focus": "Microimpacto introductorio",
+            "dose": {
+              "main": "2 x 12 reps",
+              "tempo": "Controlado",
+              "load": "1kg",
+              "vas": "VAS max 4/10"
+            },
+            "desc": "Pica con peso colgado de goma. Caida muy corta (10 cm), amortigua extendiendo las munecas.",
+            "cues": [
+              "Altura de caida que no toque suelo. Puedes usar una cuerda.",
+              "La amortiguacion la hacen las munecas",
+              "Nota la tension en el codo: eso es el objetivo"
+            ],
+            "prog": "En Dia B aumentamos altura y volumen",
+            "vid": "cEb-UljPLvg",
+            "vsearch": "wrist+roller+drop+tendinopathy+impact+loading",
+            "impact": true
+          }
+        ]
+      },
+      {
+        "label": "Dia B",
+        "bcls": "badge-b",
+        "freq": "Ej: Jueves",
+        "focus": "Microimpacto predominante - fuerza de soporte",
+        "exs": [
+          {
+            "name": "Pica + peso en goma - microimpacto principal",
+            "focus": "Adaptacion al impacto de la pala",
+            "dose": {
+              "main": "3 x 3 reps enrrollar",
+              "tempo": "Controlado",
+              "load": "1Kg",
+              "vas": "VAS max 4/10"
+            },
+            "desc": "Volumen e intensidad maximos de microimpacto de esta semana. Deja caer el peso 15 cm y amortigua.",
+            "cues": [
+              "Suma 1kg de peso sin no hay dolor o molestia",
+              "No más de 1m de largo",
+              "Notarás que se cargan los brazos",
+              "Si duele mas de 4/10 reduce peso o la longitud de recogida"
+            ],
+            "prog": "Sem 3: 20 cm. Sem 5: 30 cm. Sem 5b: unilateral.",
+            "vid": "0hUE_yLaPJA",
+            "vsearch": "wrist+roller+drop+forearm+plyometric+tendinopathy",
+            "impact": true
+          },
+          {
+            "name": "Extension de muneca - sesion de soporte",
+            "focus": "Tendon extensor mantenimiento",
+            "dose": {
+              "main": "2 x 12 reps",
+              "tempo": "Tempo 3-0-3",
+              "load": "Igual que Dia A",
+              "vas": "VAS max 4/10"
+            },
+            "desc": "Mismo ejercicio que el Dia A pero con menor volumen. Mantener el estimulo de fuerza sin sobrecargar el dia de microimpacto.",
+            "cues": [
+              "Misma carga que usaste en Dia A",
+              "Solo 2 series",
+              "Si ya estas cansada reduce 0.5 kg"
+            ],
+            "prog": "La progresion de carga la marca el Dia A",
+            "vid": "",
+            "vsearch": "wrist+extension+eccentric+dumbbell"
+          },
+          {
+            "name": "Extension dedos - sesion de soporte",
+            "focus": "Extensores de los dedos",
+            "dose": {
+              "main": "2 x 12 reps",
+              "tempo": "Controlado",
+              "load": "Goma fina",
+              "vas": "VAS max 4/10"
+            },
+            "desc": "Misma goma que en Dia A menor volumen. Incluye extension dedo a dedo si has progresado bien.",
+            "cues": [
+              "Solo 2 series",
+              "Dedo a dedo si lo estas introduciendo"
+            ],
+            "prog": "La progresion de resistencia la marca el Dia A",
+            "vid": "",
+            "vsearch": "finger+extension+resistance+band+tennis+elbow"
+          },
+          {
+            "name": "Rebote con pala",
+            "focus": "Flexores/extensones",
+            "dose": {
+              "main": "3x20\" por lado",
+              "tempo": "Mini rebotes",
+              "load": "pelota padel",
+              "vas": "VAS max 4/10"
+            },
+            "desc": "Con pelota y pala iniciar mini rebotes\n20\" palma arriba-20\" palma abajo",
+            "cues": [
+              "Codo flexionado y cerca de las costillas"
+            ],
+            "prog": "Aumentar tiempo de rebote si no hay molestia VAS 2/10",
+            "vid": "",
+            "vsearch": "Rebote+con+pala",
+            "impact": false,
+            "_added": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mc2",
+    "label": "Microciclo 2 - Progresion de carga",
+    "weeks": "Semanas 3-4",
+    "cls": "mc2",
+    "info": "Reducimos repeticiones y subimos carga. El tendon lleva 2 semanas de estimulo y esta preparado para mas.",
+    "itype": "ib-orange",
+    "criteria": [
+      {
+        "label": "Criterio de entrada",
+        "value": "VAS 24h menor/igual 3 en sem 1-2"
+      },
+      {
+        "label": "Carga minima",
+        "value": "Extension muneca mayor/igual 1 kg"
+      },
+      {
+        "label": "VAS en reposo",
+        "value": "0/10 siempre"
+      }
+    ],
+    "days": [
+      {
+        "label": "Dia A",
+        "bcls": "badge-a",
+        "freq": "Ej: Lunes",
+        "focus": "Fuerza alta - microimpacto moderado",
+        "exs": [
+          {
+            "name": "Extension de muneca - carga progresiva",
+            "focus": "Tendon extensor alta carga",
+            "dose": {
+              "main": "3 x 12 reps",
+              "tempo": "Tempo 3-0-3",
+              "load": "1-1.5 kg",
+              "vas": "VAS max 4/10"
+            },
+            "desc": "Mismo movimiento mas peso menos repeticiones. Las ultimas 3 reps deben ser un esfuerzo real (RPE 7/10).",
+            "cues": [
+              "Las ultimas 3 reps deben costarte RPE 7/10",
+              "3 minutos de descanso entre series",
+              "Anota el peso para controlar la progresion"
+            ],
+            "prog": "Objetivo semana 4: 3x10 con carga desafiante",
+            "vid": "",
+            "vsearch": "wrist+extension+heavy+slow+resistance+HSR"
+          },
+          {
+            "name": "Extension dedos - goma media",
+            "focus": "Extensores de los dedos",
+            "dose": {
+              "main": "3 x 12 reps",
+              "tempo": "Controlado",
+              "load": "Goma media",
+              "vas": "VAS max 4/10"
+            },
+            "desc": "Goma de mayor resistencia. Extension dedo a dedo: indice, corazon, anular como parte fija de la sesion.",
+            "cues": [
+              "Prueba cada dedo por separado",
+              "El corazon y el anular suelen ser los mas debiles",
+              "Compara ambas manos cada semana"
+            ],
+            "prog": "Goma alta cuando 3x12 sea comodo",
+            "vid": "",
+            "vsearch": "individual+finger+extension+resistance+hand+therapy"
+          },
+          {
+            "name": "Tyler Twist adaptado - excentrico con goma",
+            "focus": "Estimulacion excentrica maxima",
+            "dose": {
+              "main": "3 x 12 reps",
+              "tempo": "4-5 seg excentrico",
+              "load": "Goma media",
+              "vas": "VAS max 4/10"
+            },
+            "desc": "La mano sana sube, la mano con dolor baja lentamente (4-5 seg). Evidencia: reduccion del 81% de dolor a 6 semanas.",
+            "cues": [
+              "La subida: mano sana. La bajada: mano con dolor",
+              "Cuenta 4-5 seg bajando despacio",
+              "Con FlexBar: Tyler Twist; sin el: goma en polea o puerta"
+            ],
+            "prog": "Aumenta resistencia. Luego movimiento completo con mano afecta.",
+            "vid": "",
+            "vsearch": "tyler+twist+flexbar+eccentric+tennis+elbow"
+          },
+          {
+            "name": "Agarre sostenido cronometrado",
+            "focus": "Resistencia del grip",
+            "dose": {
+              "main": "3 x 30 seg",
+              "tempo": "Sostenido",
+              "load": "Agarre moderado-alto",
+              "vas": "VAS max 3/10"
+            },
+            "desc": "Progresion desde los 20 seg. Cronometra fuerza constante.",
+            "cues": [
+              "30 seg es mas de lo que parece",
+              "Fuerza constante durante todo el tiempo",
+              "Si dolor mas de 3/10 antes de los 30 seg para"
+            ],
+            "prog": "30 seg - 45 - 60 seg",
+            "vid": "",
+            "vsearch": "grip+endurance+isometric+racket+sport"
+          },
+          {
+            "name": "Pica + peso en goma - impacto moderado",
+            "focus": "Microimpacto moderado",
+            "dose": {
+              "main": "2 x 8 reps",
+              "tempo": "Controlado",
+              "load": "500g caida 20cm",
+              "vas": "VAS max 4/10"
+            },
+            "desc": "Altura aumentada a 20 cm. Menor volumen que Dia B. El enfasis sigue siendo la fuerza.",
+            "cues": [
+              "Altura 20 cm",
+              "2 series solo; el dia de impacto maximo es el Dia B"
+            ],
+            "prog": "Dia B esta semana: 3x10 a 25 cm",
+            "vid": "",
+            "vsearch": "wrist+roller+drop+forearm+plyometric+tendinopathy",
+            "impact": true
+          }
+        ]
+      },
+      {
+        "label": "Dia B",
+        "bcls": "badge-b",
+        "freq": "Ej: Jueves",
+        "focus": "Microimpacto progresivo - fuerza de apoyo",
+        "exs": [
+          {
+            "name": "Pica + peso en goma - microimpacto progresivo",
+            "focus": "Adaptacion al impacto progresion",
+            "dose": {
+              "main": "3 x 10 reps",
+              "tempo": "Controlado",
+              "load": "500g-1kg caida 25cm",
+              "vas": "VAS max 4/10"
+            },
+            "desc": "Altura aumentada a 25 cm mas peso. El impacto es claramente mayor.",
+            "cues": [
+              "Altura 25 cm",
+              "Si hay inseguridad empieza en 20 cm",
+              "Tension en codo: normal si menor/igual 4/10"
+            ],
+            "prog": "Sem 5: 30-35 cm. Sem 5b: unilateral con 20 cm.",
+            "vid": "",
+            "vsearch": "reactive+loading+forearm+tendinopathy+plyometric",
+            "impact": true
+          },
+          {
+            "name": "Extension de muneca - soporte Dia B",
+            "focus": "Tendon extensor mantenimiento",
+            "dose": {
+              "main": "2 x 10 reps",
+              "tempo": "Tempo 3-0-3",
+              "load": "Igual que Dia A",
+              "vas": "VAS max 4/10"
+            },
+            "desc": "2 series de mantenimiento. La carga de Dia A es la referencia.",
+            "cues": [
+              "Misma carga que en Dia A",
+              "No progreses aqui la progresion es en Dia A"
+            ],
+            "prog": "",
+            "vid": "",
+            "vsearch": "wrist+extension+eccentric+dumbbell"
+          },
+          {
+            "name": "Pronosupinacion cargada",
+            "focus": "Estabilizadores del codo",
+            "dose": {
+              "main": "3 x 12 reps",
+              "tempo": "2-0-2",
+              "load": "1 kg",
+              "vas": "VAS max 3/10"
+            },
+            "desc": "Misma mecanica que en Microciclo 1 pero con ligeramente mas peso.",
+            "cues": [
+              "Codo pegado al cuerpo",
+              "Rango completo",
+              "Progresa si 3x12 resulta facil"
+            ],
+            "prog": "Sube a 1.5 kg si 3x12 no supera RPE 5",
+            "vid": "",
+            "vsearch": "pronation+supination+forearm+exercise"
+          },
+          {
+            "name": "Diagonal D2 introductoria - patron del golpe",
+            "focus": "Cadena cinetica del golpe de padel",
+            "dose": {
+              "main": "3 x 12 reps",
+              "tempo": "Fluido",
+              "load": "Goma baja-media",
+              "vas": "VAS max 3/10"
+            },
+            "desc": "Movimiento diagonal que imita el golpe de padel. Bilateral primero.",
+            "cues": [
+              "Movimiento fluido como el golpe real",
+              "Bilateral las primeras sesiones",
+              "Trabaja tanto derecha como reves"
+            ],
+            "prog": "Unilateral afecto en Microciclo 3",
+            "vid": "",
+            "vsearch": "PNF+diagonal+D2+shoulder+arm+padel+tennis+rehab"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mc3",
+    "label": "Microciclo 3 - Retorno al padel",
+    "weeks": "Semanas 5-6",
+    "cls": "mc3",
+    "info": "El tendon esta preparado para cargas deportivas. Introducimos el padel de forma progresiva. Sigue haciendo los ejercicios de fuerza aunque ya estes jugando.",
+    "itype": "ib-green",
+    "criteria": [
+      {
+        "label": "VAS 24h post-ejercicio",
+        "value": "Menor/igual 3/10 constante"
+      },
+      {
+        "label": "VAS en reposo",
+        "value": "0/10 siempre"
+      },
+      {
+        "label": "Fuerza agarre afecto/sano",
+        "value": "Mayor/igual 75%"
+      }
+    ],
+    "days": [
+      {
+        "label": "Dia A",
+        "bcls": "badge-a",
+        "freq": "Ej: Lunes",
+        "focus": "Carga maxima - microimpacto moderado",
+        "exs": [
+          {
+            "name": "Extension de muneca - zona de alta carga",
+            "focus": "Fuerza maxima del tendon",
+            "dose": {
+              "main": "4 x 8-10 reps",
+              "tempo": "Tempo 3-0-3",
+              "load": "RPE 7-8/10",
+              "vas": "VAS max 4/10"
+            },
+            "desc": "Carga maxima tolerable con buena tecnica. Las ultimas 2 reps deben ser un esfuerzo serio. 3 min de descanso.",
+            "cues": [
+              "Si haces 10 reps facil el peso es demasiado bajo",
+              "3 min de descanso entre series",
+              "Ajusta el peso segun como te encuentres"
+            ],
+            "prog": "Mantener 2x/semana indefinidamente previene la recaida",
+            "vid": "",
+            "vsearch": "wrist+extension+maximum+load+tendinopathy+strength"
+          },
+          {
+            "name": "Extension dedos - carga alta",
+            "focus": "Fuerza extensora de los dedos",
+            "dose": {
+              "main": "4 x 10 reps",
+              "tempo": "3-0-3",
+              "load": "Goma alta resistencia",
+              "vas": "VAS max 4/10"
+            },
+            "desc": "Maxima resistencia. Objetivo: fuerza equivalente entre ambas manos antes del retorno al padel.",
+            "cues": [
+              "Compara ambas manos cada semana deben ser similares",
+              "Extension completa en cada rep",
+              "Dedo a dedo si hay diferencias"
+            ],
+            "prog": "Simetria bilateral es el criterio de retorno",
+            "vid": "",
+            "vsearch": "finger+extension+high+resistance+sport+return"
+          },
+          {
+            "name": "Diagonal D2 unilateral afecto (Kabat)",
+            "focus": "Cadena cinetica completa",
+            "dose": {
+              "main": "3 x 12 reps",
+              "tempo": "Fluido velocidad creciente",
+              "load": "Goma media-alta",
+              "vas": "VAS max 3/10"
+            },
+            "desc": "Solo con el brazo afecto. Velocidad creciente semana a semana. Trabaja patron de derecha y reves.",
+            "cues": [
+              "Aumenta la velocidad gradualmente: simula el juego real",
+              "Patron de derecha y de reves",
+              "Resistencia creciente de la goma"
+            ],
+            "prog": "Aumenta velocidad y resistencia",
+            "vid": "",
+            "vsearch": "PNF+diagonal+D2+unilateral+padel+tennis+return"
+          },
+          {
+            "name": "Rotacion externa de hombro",
+            "focus": "Manguito rotador - control del golpe",
+            "dose": {
+              "main": "3 x 15 reps",
+              "tempo": "2-0-2",
+              "load": "Goma media",
+              "vas": "VAS max 3/10"
+            },
+            "desc": "Codo 90 grados pegado al cuerpo. Rotacion externa resistida con goma. Fundamental para el control del hombro.",
+            "cues": [
+              "Codo pegado al cuerpo en todo momento",
+              "Rango completo de rotacion",
+              "Fortalece infraespinoso y redondo menor"
+            ],
+            "prog": "Goma alta si 3x15 no supera RPE 5",
+            "vid": "",
+            "vsearch": "shoulder+external+rotation+resistance+band+exercise"
+          },
+          {
+            "name": "Pica + peso en goma - microimpacto Dia A",
+            "focus": "Microimpacto volumen controlado",
+            "dose": {
+              "main": "2 x 8 reps",
+              "tempo": "Controlado",
+              "load": "1kg caida 30cm",
+              "vas": "VAS max 4/10"
+            },
+            "desc": "En el Dia A el microimpacto tiene menor volumen. Altura 30 cm ya establecida.",
+            "cues": [
+              "2 series solo",
+              "Altura 30 cm ya bien establecida",
+              "Dia B es donde el impacto sera maximo"
+            ],
+            "prog": "Dia B: posible unilateral a 15-20 cm",
+            "vid": "",
+            "vsearch": "wrist+roller+drop+forearm+plyometric",
+            "impact": true
+          }
+        ]
+      },
+      {
+        "label": "Dia B",
+        "bcls": "badge-b",
+        "freq": "Ej: Jueves",
+        "focus": "Microimpacto maximo - retorno al padel",
+        "exs": [
+          {
+            "name": "Pica + peso en goma - microimpacto pleno",
+            "focus": "Adaptacion maxima al impacto",
+            "dose": {
+              "main": "3 x 10 reps",
+              "tempo": "Progresivo",
+              "load": "1-1.5kg caida 30-35cm",
+              "vas": "VAS max 4/10"
+            },
+            "desc": "Altura maxima y peso maximo del programa. Si la respuesta es buena prueba unilateral comenzando con 15-20 cm.",
+            "cues": [
+              "Si va unilateral empieza en 15-20 cm",
+              "El impacto unilateral es notablemente mayor",
+              "Esta es la ultima progresion antes del golpe real"
+            ],
+            "prog": "Retorno al padel cuando dolor 24h menor/igual 3 de forma consistente",
+            "vid": "",
+            "vsearch": "unilateral+plyometric+wrist+extension+tendinopathy+sport",
+            "impact": true
+          },
+          {
+            "name": "Extension muneca - soporte Dia B final",
+            "focus": "Mantenimiento de fuerza",
+            "dose": {
+              "main": "2 x 8 reps",
+              "tempo": "Tempo 3-0-3",
+              "load": "Carga alta igual Dia A",
+              "vas": "VAS max 4/10"
+            },
+            "desc": "2 series de mantenimiento con la carga maxima.",
+            "cues": [
+              "2 series con la carga del Dia A",
+              "Si el microimpacto te tiene muy fatigada reduce 0.5 kg"
+            ],
+            "prog": "",
+            "vid": "",
+            "vsearch": "wrist+extension+eccentric+dumbbell"
+          },
+          {
+            "name": "Peloteo progresivo en pista",
+            "focus": "Retorno al padel",
+            "dose": {
+              "main": "15-40 min",
+              "tempo": "Dias alternos",
+              "load": "Sin smash todavia",
+              "vas": "VAS 24h menor/igual 3"
+            },
+            "desc": "Sem 5: pared solo derecha 15 min. Sem 5b: anadir reves. Sem 6: partido corto. Sem 6b: retorno completo si VAS 24h post-partido menor/igual 2 dos sesiones seguidas.",
+            "cues": [
+              "No smash hasta VAS 24h menor/igual 2 constante",
+              "Si dolor mayor de 4 post-padel retrocede un paso",
+              "Sigue los ejercicios de fuerza aunque juegues",
+              "El mantenimiento 2x/semana es tu seguro contra la recaida"
+            ],
+            "prog": "Retorno completo: VAS 24h post-partido menor/igual 2 en 2 sesiones seguidas",
+            "vid": "",
+            "vsearch": "return+padel+tennis+elbow+lateral+epicondylalgia+sport"
+          }
+        ]
+      }
+    ]
+  }
+];
+/* @@DATA_END@@ */
+
+var prog = JSON.parse(JSON.stringify(PDATA));
+
+function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
+function loadOverrides() {
+  prog.forEach(function(mc) {
+    mc.days.forEach(function(day, di) {
+      day.exs.forEach(function(ex, ei) {
+        ['main','tempo','load','vas'].forEach(function(f) {
+          var k = 'dose_' + mc.id + '_' + di + '_' + ei + '_' + f;
+          try { var v = localStorage.getItem(k); if (v !== null && v !== '') ex.dose[f] = v; } catch(e) {}
+        });
+        try { var dv = localStorage.getItem('desc_'+mc.id+'_'+di+'_'+ei); if (dv !== null) ex.desc = dv; } catch(e) {}
+        try { var cv = localStorage.getItem('cues_'+mc.id+'_'+di+'_'+ei); if (cv !== null) ex.cues = JSON.parse(cv); } catch(e) {}
+        try { var vv = localStorage.getItem('vid_'+mc.id+'_'+di+'_'+ei);  if (vv !== null) ex.vid  = vv;  } catch(e) {}
+      });
+      var dk = 'deleted_' + mc.id + '_' + di;
+      try {
+        var del = JSON.parse(localStorage.getItem(dk) || '[]');
+        if (del.length) day.exs = day.exs.filter(function(e) { return del.indexOf(e.name) === -1; });
+      } catch(e) {}
+      var ak = 'added_' + mc.id + '_' + di;
+      try {
+        var added = JSON.parse(localStorage.getItem(ak) || '[]');
+        day.exs = day.exs.filter(function(e) { return !e._added; });
+        added.forEach(function(e) { e._added = true; day.exs.push(e); });
+      } catch(e) {}
+    });
+  });
+}
+
+function renderAll() {
+  prog.forEach(function(mc) {
+    var panel = document.getElementById(mc.id);
+    if (!panel) return;
+    var h = '';
+    h += '<div class="info-box ' + mc.itype + '"><span class="ib-icon">&#8505;&#65039;</span><div>' + mc.info + '</div></div>';
+    if (mc.criteria) {
+      h += '<div class="criteria">';
+      mc.criteria.forEach(function(c) {
+        h += '<div class="crit-card"><div class="crit-label">' + c.label + '</div><div class="crit-value">' + c.value + '</div></div>';
+      });
+      h += '</div>';
+    }
+    h += '<div class="day-tabs" id="tabs-' + mc.id + '">';
+    mc.days.forEach(function(d, i) {
+      h += '<button class="day-tab ' + (i===0?'active':'') + '" onclick="showDay(\'' + mc.id + '\',' + i + ')">' + d.label + ' <span style="font-weight:400;opacity:.6;font-size:11px">' + d.freq + '</span></button>';
+    });
+    h += '</div>';
+    mc.days.forEach(function(day, di) {
+      h += '<div id="day-' + mc.id + '-' + di + '" style="display:' + (di===0?'block':'none') + '">';
+      h += '<div class="day-label-bar"><span class="day-badge ' + day.bcls + '">' + day.label + '</span><span class="day-freq">' + day.freq + '</span><span class="day-focus">' + day.focus + '</span></div>';
+      h += '<div class="ex-grid" id="grid-' + mc.id + '-' + di + '">';
+      day.exs.forEach(function(ex, ei) { h += buildCard(ex, mc.id, di, ei); });
+      h += '</div>';
+      h += '<button class="btn-add-ex" onclick="quickAdd(\'' + mc.id + '\',' + di + ')">&#10133; A&#241;adir ejercicio aqu&#237;</button>';
+      h += '</div>';
+    });
+    panel.innerHTML = h;
+  });
+}
+
+function buildCard(ex, mcId, di, ei) {
+  var imp = ex.impact ? ' is-impact' : '';
+  var add = ex._added ? ' is-added' : '';
+  var d   = ex.dose || {};
+  var hasVid = ex.vid && ex.vid.length > 3;
+  var vBtn = hasVid
+    ? '<button class="btn-yt" onclick="openVid(\'' + ex.vid + '\')">&#9654; Ver v&#237;deo</button>'
+    : '<a class="btn-yt-search" href="https://www.youtube.com/results?search_query=' + (ex.vsearch||'') + '" target="_blank" rel="noopener">&#9654; Buscar v&#237;deo</a>';
+  var cues = (ex.cues||[]).map(function(c) { return '<li>' + c + '</li>'; }).join('');
+  var h = '';
+  h += '<div class="ex-card' + imp + add + '">';
+  h += '<div class="ex-head">';
+  h += '<div class="ex-num">' + (ei+1) + '</div>';
+  h += '<div class="ex-title-wrap"><div class="ex-name">' + esc(ex.name) + '</div><span class="ex-focus-tag">' + esc(ex.focus||'') + '</span></div>';
+  h += '<button class="btn-del" data-mc="' + mcId + '" data-di="' + di + '" data-ei="' + ei + '" title="Eliminar ejercicio">&#10005;</button>';
+  h += '</div>';
+  h += '<div class="ex-dose">';
+  if (d.main)  h += mkChip(d.main,  'chip-main',  mcId, di, ei, 'main');
+  if (d.tempo) h += mkChip(d.tempo, 'chip-tempo', mcId, di, ei, 'tempo');
+  if (d.load)  h += mkChip(d.load,  'chip-load',  mcId, di, ei, 'load');
+  if (d.vas)   h += mkChip(d.vas,   'chip-vas',   mcId, di, ei, 'vas');
+  h += '</div>';
+  h += '<div class="ex-body" id="body-' + mcId + '-' + di + '-' + ei + '">';
+  h += '<div class="ex-desc" data-mc="' + mcId + '" data-di="' + di + '" data-ei="' + ei + '" data-type="desc">' + esc(ex.desc||'') + '<div class="edit-hint-txt">&#9998; Clic para editar descripcion</div></div>';
+  h += '<div class="ex-cues-wrap" data-mc="' + mcId + '" data-di="' + di + '" data-ei="' + ei + '" data-type="cues"><ul class="ex-cues">' + cues + '</ul><div class="edit-hint-txt">&#9998; Clic para editar puntos clave (uno por linea)</div></div>';
+  if (ex.prog) h += '<div class="ex-prog">&#128200; ' + esc(ex.prog) + '</div>';
+  h += '</div>';
+  h += '<div class="ex-foot">' + vBtn;
+  h += '<button class="btn-vid-edit" data-mc="' + mcId + '" data-di="' + di + '" data-ei="' + ei + '">&#9998; Mi v&#237;deo</button>';
+  if (d.vas) h += '<span class="vas-badge">Max ' + d.vas + '</span>';
+  h += '</div>';
+  h += '<div class="vid-edit-wrap" id="videdit-' + mcId + '-' + di + '-' + ei + '">';
+  h += '<input class="vid-edit-inp" id="vidinp-' + mcId + '-' + di + '-' + ei + '" type="text" placeholder="Pega URL de YouTube o el ID (ej: dQw4w9WgXcQ)">';
+  h += '<button class="btn-vid-save" data-mc="' + mcId + '" data-di="' + di + '" data-ei="' + ei + '">Guardar</button>';
+  h += '<button class="btn-vid-cancel" data-mc="' + mcId + '" data-di="' + di + '" data-ei="' + ei + '">Cancelar</button>';
+  h += '</div>';
+  h += '</div>';
+  return h;
+}
+
+function mkChip(val, cls, mcId, di, ei, field) {
+  var k = 'dose_' + mcId + '_' + di + '_' + ei + '_' + field;
+  return '<span class="chip ' + cls + '" data-key="' + k + '" data-orig="' + esc(val) + '">'
+    + '<span class="chip-label">' + esc(val) + '</span>'
+    + '<input type="text" placeholder="' + field + '">'
+    + '<span class="chip-hint">&#9998;</span></span>';
+}
+
+function reRenderGrid(mcId, di) {
+  var mc = prog.find(function(m) { return m.id === mcId; });
+  var grid = document.getElementById('grid-' + mcId + '-' + di);
+  if (!mc || !grid) return;
+  grid.innerHTML = mc.days[di].exs.map(function(ex, ei) { return buildCard(ex, mcId, di, ei); }).join('');
+}
+
+/* NAV */
+var curTab = 'prog';
+function switchTab(tab) {
+  ['prog','add','rules','vas'].forEach(function(t) {
+    var el = document.getElementById('tab-' + t);
+    if (el) el.style.display = (t===tab) ? 'block' : 'none';
+  });
+  document.querySelectorAll('.nav-btn').forEach(function(b, i) {
+    b.classList.toggle('active', ['prog','add','rules','vas'][i] === tab);
+  });
+  curTab = tab;
+}
+function showPhase(mcId) {
+  document.querySelectorAll('.phase-panel').forEach(function(p) { p.classList.remove('active'); });
+  var panel = document.getElementById(mcId);
+  if (panel) panel.classList.add('active');
+  document.querySelectorAll('.tl-item').forEach(function(t) { t.classList.remove('active'); });
+  var ti = document.querySelector('.tl-item.' + mcId);
+  if (ti) ti.classList.add('active');
+  var mc = prog.find(function(m) { return m.id === mcId; });
+  if (mc) document.getElementById('phase-label').textContent = mc.label + ' (' + mc.weeks + ')';
+  if (curTab !== 'prog') switchTab('prog');
+}
+function showDay(mcId, di) {
+  var mc = prog.find(function(m) { return m.id === mcId; });
+  if (!mc) return;
+  mc.days.forEach(function(d, i) {
+    var el = document.getElementById('day-' + mcId + '-' + i);
+    if (el) el.style.display = (i===di) ? 'block' : 'none';
+  });
+  document.querySelectorAll('#tabs-' + mcId + ' .day-tab').forEach(function(b, i) {
+    b.classList.toggle('active', i===di);
+  });
+}
+
+/* CHIPS */
+function chipClick(chip) {
+  var lbl = chip.querySelector('.chip-label');
+  var inp = chip.querySelector('input');
+  inp.value = lbl.textContent.trim();
+  chip.classList.add('editing');
+  inp.focus(); inp.select();
+}
+function chipSave(inp) {
+  var chip = inp.closest('.chip');
+  var lbl  = chip.querySelector('.chip-label');
+  var val  = inp.value.trim() || chip.getAttribute('data-orig');
+  lbl.textContent = val;
+  chip.classList.remove('editing');
+  var k = chip.getAttribute('data-key');
+  try { localStorage.setItem(k, val); } catch(e) {}
+  var parts = k.split('_');
+  var field = parts[parts.length-1];
+  var ei    = parseInt(parts[parts.length-2], 10);
+  var di    = parseInt(parts[parts.length-3], 10);
+  var mcId  = parts.slice(1, parts.length-3).join('_');
+  var mc = prog.find(function(m) { return m.id === mcId; });
+  if (mc && mc.days[di] && mc.days[di].exs[ei]) mc.days[di].exs[ei].dose[field] = val;
+  markUnsaved();
+}
+function chipKey(e, inp) {
+  if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+  if (e.key === 'Escape') { inp.closest('.chip').classList.remove('editing'); inp.blur(); }
+}
+
+/* ADD EXERCISE */
+function quickAdd(mcId, di) {
+  document.getElementById('add-mc').value  = mcId;
+  document.getElementById('add-day').value = String(di);
+  switchTab('add');
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+function addExercise() {
+  var name = document.getElementById('add-name').value.trim();
+  if (!name) { alert('El nombre del ejercicio es obligatorio.'); return; }
+  var mcId = document.getElementById('add-mc').value;
+  var di   = parseInt(document.getElementById('add-day').value, 10);
+  var raw  = document.getElementById('add-cues').value.trim();
+  var ex   = {
+    name:   name,
+    focus:  document.getElementById('add-focus').value.trim() || 'Ejercicio',
+    dose:   { main: document.getElementById('add-main').value.trim()  || '3 x 12 reps',
+              tempo:document.getElementById('add-tempo').value.trim(),
+              load: document.getElementById('add-load').value.trim(),
+              vas:  document.getElementById('add-vas').value.trim() || 'VAS max 4/10' },
+    desc:    document.getElementById('add-desc').value.trim(),
+    cues:    raw ? raw.split('\n').map(function(c){return c.trim();}).filter(Boolean) : [],
+    prog:    document.getElementById('add-prog').value.trim(),
+    vid:     document.getElementById('add-video').value.trim(),
+    vsearch: name.replace(/\s+/g, '+'),
+    impact:  document.getElementById('add-impact').checked,
+    _added:  true
+  };
+  var mc = prog.find(function(m) { return m.id === mcId; });
+  if (!mc || !mc.days[di]) { alert('Microciclo o dia no encontrado.'); return; }
+  mc.days[di].exs.push(ex);
+  try {
+    var ak  = 'added_' + mcId + '_' + di;
+    var arr = JSON.parse(localStorage.getItem(ak) || '[]');
+    arr.push(ex);
+    localStorage.setItem(ak, JSON.stringify(arr));
+  } catch(e) {}
+  reRenderGrid(mcId, di);
+  clearAddForm();
+  showPhase(mcId); showDay(mcId, di);
+  markUnsaved();
+  alert('Ejercicio "' + name + '" anadido correctamente.');
+}
+function clearAddForm() {
+  ['add-name','add-focus','add-video','add-main','add-tempo','add-load','add-vas','add-desc','add-cues','add-prog']
+    .forEach(function(id) { document.getElementById(id).value = ''; });
+  document.getElementById('add-impact').checked = false;
+}
+
+/* VIDEO */
+function openVid(id) {
+  document.getElementById('vidFrame').src = 'https://www.youtube.com/embed/' + id + '?autoplay=1';
+  document.getElementById('vidModal').classList.add('open');
+}
+function closeVid() {
+  document.getElementById('vidFrame').src = '';
+  document.getElementById('vidModal').classList.remove('open');
+}
+function parseYouTubeId(s) {
+  s = s.trim();
+  var m;
+  m = s.match(/[?&]v=([a-zA-Z0-9_-]{11})/);       if (m) return m[1];
+  m = s.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);   if (m) return m[1];
+  m = s.match(/embed\/([a-zA-Z0-9_-]{11})/);        if (m) return m[1];
+  m = s.match(/shorts\/([a-zA-Z0-9_-]{11})/);       if (m) return m[1];
+  if (/^[a-zA-Z0-9_-]{11}$/.test(s)) return s;
+  return null;
+}
+
+/* VAS */
+var VAS_ROWS = [
+  { key:'rest',  label:'&#128564; En reposo' },
+  { key:'ex',    label:'&#127947; Durante el ejercicio' },
+  { key:'post',  label:'&#8987; 24h post-ejercicio' },
+  { key:'padel', label:'&#127934; 24h post-padel' }
+];
+function buildVasTable() {
+  var tb = document.getElementById('vasBody'); if (!tb) return;
+  var h = '';
+  VAS_ROWS.forEach(function(r) {
+    h += '<tr><td>' + r.label + '</td>';
+    for (var w=1;w<=6;w++) h += '<td><input class="vas-inp" type="number" min="0" max="10" step="0.5" data-key="' + r.key + '-' + w + '" oninput="saveVas(this)" placeholder="&mdash;"></td>';
+    h += '</tr>';
+  });
+  tb.innerHTML = h;
+}
+function saveVas(inp) {
+  try { localStorage.setItem('vas_' + inp.getAttribute('data-key'), inp.value); } catch(e) {}
+  colorVas(inp);
+}
+function loadVasData() {
+  document.querySelectorAll('.vas-inp').forEach(function(inp) {
+    try { var v = localStorage.getItem('vas_' + inp.getAttribute('data-key')); if (v!==null){inp.value=v;colorVas(inp);} } catch(e) {}
+  });
+}
+function colorVas(inp) {
+  var v = parseFloat(inp.value);
+  inp.classList.remove('cv0','cv13','cv4','cv56','cv7p');
+  if (isNaN(v)) return;
+  if (v===0) inp.classList.add('cv0');
+  else if (v<=3) inp.classList.add('cv13');
+  else if (v<=4) inp.classList.add('cv4');
+  else if (v<=6) inp.classList.add('cv56');
+  else inp.classList.add('cv7p');
+}
+function clearVas() {
+  if (!confirm('Borrar todos los registros de VAS?')) return;
+  document.querySelectorAll('.vas-inp').forEach(function(inp) {
+    try { localStorage.removeItem('vas_' + inp.getAttribute('data-key')); } catch(e) {}
+    inp.value = '';
+    inp.classList.remove('cv0','cv13','cv4','cv56','cv7p');
+  });
+}
+function exportVasCSV() {
+  var lines = ['Momento,Sem1,Sem2,Sem3,Sem4,Sem5,Sem6'];
+  VAS_ROWS.forEach(function(r) {
+    var row = ['"' + r.label + '"'];
+    for (var w=1;w<=6;w++) { try { row.push(localStorage.getItem('vas_'+r.key+'-'+w)||''); } catch(e) { row.push(''); } }
+    lines.push(row.join(','));
+  });
+  var a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(lines.join('\n'));
+  a.download = 'mis_datos_vas.csv';
+  a.click();
+}
+
+/* EXPORT */
+function markUnsaved() {
+  var b = document.getElementById('saveBanner');
+  if (!b) return;
+  b.classList.add('show');
+  /* scroll banner into view on mobile */
+  b.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function exportHTML() {
+  var m1 = '/* @@DATA_START@@ */';
+  var m2 = '/* @@DATA_END@@ */';
+  var newData = m1 + '\nvar PDATA = ' + JSON.stringify(prog, null, 2) + ';\n' + m2;
+  var s  = document.documentElement.outerHTML;
+  var i1 = s.indexOf(m1), i2 = s.indexOf(m2) + m2.length;
+  if (i1 > 0 && i2 > m2.length) s = s.slice(0, i1) + newData + s.slice(i2);
+  s = s.replace(/class="save-banner"/g, 'class="save-banner"');
+  /* Use data URI — works on local files without server */
+  try {
+    var encoded = btoa(unescape(encodeURIComponent(s)));
+    var a = document.createElement('a');
+    a.href = 'data:text/html;charset=utf-8;base64,' + encoded;
+    a.download = 'programa_codo.html';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } catch(err) {
+    /* Fallback: open in new tab so user can save manually with Ctrl+S */
+    var w = window.open('', '_blank');
+    if (w) {
+      w.document.write(s);
+      w.document.close();
+      alert('Usa Ctrl+S (o Cmd+S en Mac) en la nueva pestana para guardar el archivo.');
+    }
+  }
+  var b = document.getElementById('saveBanner');
+  if (b) b.classList.remove('show');
+}
+
+/* EDIT MODE */
+function toggleEditMode() {
+  var body = document.body;
+  var btn  = document.getElementById('btnEditMode');
+  if (body.classList.contains('edit-mode')) {
+    body.classList.remove('edit-mode');
+    btn.classList.remove('on');
+    btn.textContent = 'Editar';
+  } else {
+    body.classList.add('edit-mode');
+    btn.classList.add('on');
+    btn.textContent = 'Listo';
+  }
+}
+
+/* EVENT DELEGATION — all interactive elements */
+document.addEventListener('click', function(evt) {
+  var t = evt.target;
+
+  /* CHIP click */
+  var chip = t.classList.contains('chip') ? t : (t.closest ? t.closest('.chip') : null);
+  if (chip && !chip.classList.contains('editing') && !t.tagName.match(/INPUT|BUTTON/i)) {
+    chipClick(chip); return;
+  }
+  /* CHIP input blur handled via onblur in chip — but input enter/escape via keydown */
+
+  /* DELETE button */
+  var del = t.classList.contains('btn-del') ? t : (t.closest ? t.closest('.btn-del') : null);
+  if (del && !del.getAttribute('data-confirming')) {
+    evt.preventDefault(); evt.stopPropagation();
+    var mcId = del.getAttribute('data-mc');
+    var di   = parseInt(del.getAttribute('data-di'), 10);
+    var ei   = parseInt(del.getAttribute('data-ei'), 10);
+    var mc   = prog.find(function(m) { return m.id === mcId; });
+    if (!mc || !mc.days[di] || !mc.days[di].exs[ei]) return;
+    var exName   = mc.days[di].exs[ei].name;
+    var wasAdded = mc.days[di].exs[ei]._added;
+    del.textContent = 'Borrar?';
+    del.style.cssText = 'font-size:11px;padding:3px 6px;min-width:0;width:auto;opacity:1;background:var(--rd-lt);color:var(--red);border-radius:6px;border:1px solid #f5b0b0';
+    del.setAttribute('data-confirming', '1');
+    function onConfirm(e2) {
+      if (e2.target === del || (del.contains && del.contains(e2.target))) {
+        e2.preventDefault(); e2.stopPropagation();
+        document.removeEventListener('click', onConfirm, true);
+        mc.days[di].exs.splice(ei, 1);
+        if (wasAdded) {
+          try { var ak='added_'+mcId+'_'+di; var arr=JSON.parse(localStorage.getItem(ak)||'[]'); localStorage.setItem(ak,JSON.stringify(arr.filter(function(e){return e.name!==exName;}))); } catch(x) {}
+        } else {
+          try { var dk='deleted_'+mcId+'_'+di; var dl=JSON.parse(localStorage.getItem(dk)||'[]'); if(dl.indexOf(exName)===-1)dl.push(exName); localStorage.setItem(dk,JSON.stringify(dl)); } catch(x) {}
+        }
+        reRenderGrid(mcId, di);
+        markUnsaved();     } else {
+        document.removeEventListener('click', onConfirm, true);
+        del.textContent = '\u2715';
+        del.style.cssText = '';
+        del.removeAttribute('data-confirming');
+      }
+    }
+    setTimeout(function() { document.addEventListener('click', onConfirm, true); }, 50);
+    return;
+  }
+
+  /* TEXT EDIT — desc and cues */
+  var teEl = null;
+  if (t.classList.contains('ex-desc') || t.classList.contains('ex-cues-wrap')) teEl = t;
+  else if (t.closest) { var p = t.closest('.ex-desc'); if (p) teEl = p; var q = t.closest('.ex-cues-wrap'); if (q) teEl = q; }
+  if (teEl && !teEl.classList.contains('editing')) {
+    evt.stopPropagation();
+    var tmcId = teEl.getAttribute('data-mc');
+    var tdi   = parseInt(teEl.getAttribute('data-di'), 10);
+    var tei   = parseInt(teEl.getAttribute('data-ei'), 10);
+    var ttype = teEl.getAttribute('data-type');
+    var tmc   = prog.find(function(m) { return m.id === tmcId; });
+    if (!tmc) return;
+    var tex   = tmc.days[tdi].exs[tei];
+    var tcur  = ttype === 'desc' ? (tex.desc || '') : (tex.cues || []).join('\n');
+    var rows  = ttype === 'desc' ? 3 : 5;
+    teEl.classList.add('editing');
+    var ta = document.createElement('textarea');
+    ta.className = 'text-edit-area';
+    ta.rows = rows;
+    ta.value = tcur;
+    var row = document.createElement('div');
+    row.className = 'text-edit-row';
+    var saveBtn = document.createElement('button');
+    saveBtn.className = 'btn-te-save';
+    saveBtn.textContent = 'Guardar';
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn-te-cancel';
+    cancelBtn.textContent = 'Cancelar';
+    row.appendChild(saveBtn); row.appendChild(cancelBtn);
+    teEl.innerHTML = '';
+    teEl.appendChild(ta); teEl.appendChild(row);
+    ta.focus();
+    saveBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var val = ta.value.trim();
+      if (ttype === 'desc') {
+        tmc.days[tdi].exs[tei].desc = val;
+        try { localStorage.setItem('desc_'+tmcId+'_'+tdi+'_'+tei, val); } catch(x) {}
+      } else {
+        var list = val ? val.split('\n').map(function(c){return c.trim();}).filter(Boolean) : [];
+        tmc.days[tdi].exs[tei].cues = list;
+        try { localStorage.setItem('cues_'+tmcId+'_'+tdi+'_'+tei, JSON.stringify(list)); } catch(x) {}
+      }
+      reRenderGrid(tmcId, tdi);
+      markUnsaved();
+    });
+    cancelBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      reRenderGrid(tmcId, tdi);
+    });
+    return;
+  }
+
+  /* VIDEO EDIT button */
+  var veb = t.classList.contains('btn-vid-edit') ? t : (t.closest ? t.closest('.btn-vid-edit') : null);
+  if (veb) {
+    evt.stopPropagation();
+    var vmcId = veb.getAttribute('data-mc');
+    var vdi   = parseInt(veb.getAttribute('data-di'), 10);
+    var vei   = parseInt(veb.getAttribute('data-ei'), 10);
+    var wrap  = document.getElementById('videdit-' + vmcId + '-' + vdi + '-' + vei);
+    if (!wrap) return;
+    wrap.classList.toggle('open');
+    if (wrap.classList.contains('open')) {
+      var inp = document.getElementById('vidinp-' + vmcId + '-' + vdi + '-' + vei);
+      var vmc = prog.find(function(m) { return m.id === vmcId; });
+      if (vmc && vmc.days[vdi] && vmc.days[vdi].exs[vei] && vmc.days[vdi].exs[vei].vid) {
+        inp.value = 'https://www.youtube.com/watch?v=' + vmc.days[vdi].exs[vei].vid;
+      }
+      if (inp) inp.focus();
+    }
+    return;
+  }
+
+  /* VIDEO SAVE */
+  var vsb = t.classList.contains('btn-vid-save') ? t : null;
+  if (vsb) {
+    evt.stopPropagation();
+    var vsmcId = vsb.getAttribute('data-mc');
+    var vsdi   = parseInt(vsb.getAttribute('data-di'), 10);
+    var vsei   = parseInt(vsb.getAttribute('data-ei'), 10);
+    var vsinp  = document.getElementById('vidinp-' + vsmcId + '-' + vsdi + '-' + vsei);
+    if (!vsinp) return;
+    var vidId = parseYouTubeId(vsinp.value);
+    if (!vidId && vsinp.value.trim() !== '') {
+      vsinp.style.borderColor = '#FF0000';
+      return;
+    }
+    vsinp.style.borderColor = '';
+    var vsmc = prog.find(function(m) { return m.id === vsmcId; });
+    if (vsmc && vsmc.days[vsdi] && vsmc.days[vsdi].exs[vsei]) {
+      vsmc.days[vsdi].exs[vsei].vid = vidId || '';
+      try { localStorage.setItem('vid_'+vsmcId+'_'+vsdi+'_'+vsei, vidId||''); } catch(x) {}
+    }
+    reRenderGrid(vsmcId, vsdi);
+    markUnsaved();
+    return;
+  }
+
+  /* VIDEO CANCEL */
+  var vcb = t.classList.contains('btn-vid-cancel') ? t : null;
+  if (vcb) {
+    evt.stopPropagation();
+    var vcmcId = vcb.getAttribute('data-mc');
+    var vcdi   = parseInt(vcb.getAttribute('data-di'), 10);
+    var vcei   = parseInt(vcb.getAttribute('data-ei'), 10);
+    var vwrap  = document.getElementById('videdit-' + vcmcId + '-' + vcdi + '-' + vcei);
+    if (vwrap) vwrap.classList.remove('open');
+    return;
+  }
+});
+
+/* Chip input events via delegation */
+document.addEventListener('blur', function(e) {
+  if (e.target && e.target.tagName === 'INPUT') {
+    var chip = e.target.closest ? e.target.closest('.chip') : null;
+    if (chip && chip.classList.contains('editing')) chipSave(e.target);
+  }
+}, true);
+document.addEventListener('keydown', function(e) {
+  if (e.target && e.target.tagName === 'INPUT') {
+    var chip = e.target.closest ? e.target.closest('.chip') : null;
+    if (chip) chipKey(e, e.target);
+  }
+});
+
+/* INIT */
+document.addEventListener('DOMContentLoaded', function() {
+  document.getElementById('hdr-patient').textContent    = CONFIG.patient;
+  document.getElementById('hdr-dx').textContent         = CONFIG.diagnosis;
+  document.getElementById('hdr-clinician').textContent  = CONFIG.clinician;
+  document.getElementById('foot-clinician').textContent = CONFIG.clinician;
+  document.getElementById('foot-date').textContent =
+    new Date().toLocaleDateString('es-ES', { year:'numeric', month:'long' });
+  loadOverrides();
+  renderAll();
+  buildVasTable();
+  loadVasData();
+  document.getElementById('vidModal').addEventListener('click', function(e) {
+    if (e.target === document.getElementById('vidModal')) closeVid();
+  });
+});
+</script>
+
+</body></html>
