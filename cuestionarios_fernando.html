@@ -369,6 +369,8 @@
 <style>
 .loc-tag{display:inline-block;padding:7px 14px;border-radius:20px;border:1.5px solid var(--gray-m);font-size:13px;cursor:pointer;background:#FAFAF9;color:var(--gray);transition:all .15s;user-select:none}
 .loc-tag.active{background:var(--blue-l);border-color:var(--blue);color:var(--blue);font-weight:500}
+.btn-whatsapp{background:#25D366;color:#fff;border:none;display:flex;align-items:center;gap:8px;width:100%;justify-content:center}
+.btn-whatsapp:hover{background:#1ebe5d}
 </style>
 
 <div class="btn-wrap">
@@ -430,6 +432,9 @@
     <p style="font-size:12px;color:var(--text-s);margin-top:16px;margin-bottom:6px;font-weight:500">Texto para copiar y enviar a su fisioterapeuta:</p>
     <div class="copy-block" id="copy-block"></div>
     <button class="btn btn-secondary" style="margin-top:10px;font-size:13px" onclick="copiarResultados()">📋 Copiar resultados</button>
+    <button class="btn btn-whatsapp" style="margin-top:10px;font-size:14px;font-weight:500" onclick="enviarWhatsApp()">
+      <span style="font-size:18px;vertical-align:-2px">💬</span> Enviar a mi fisioterapeuta por WhatsApp
+    </button>
   </div>
 </div>
 
@@ -539,6 +544,12 @@ function calcularResultados(){
   setTimeout(function(){document.getElementById('resultados').scrollIntoView({behavior:'smooth'})},100);
 }
 
+function enviarWhatsApp(){
+  var t=document.getElementById('copy-block').textContent;
+  if(!t.trim()){alert('⚠ Primero pulse "Ver mis resultados" para calcular las puntuaciones.');return;}
+  var url='https://wa.me/34667751844?text='+encodeURIComponent(t);
+  window.open(url,'_blank');
+}
 function copiarResultados(){
   var t=document.getElementById('copy-block').textContent;
   navigator.clipboard.writeText(t).then(function(){alert('✓ Resultados copiados al portapapeles')});
