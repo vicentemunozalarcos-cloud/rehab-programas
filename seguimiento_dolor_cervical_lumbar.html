@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mi Diario de Salud</title>
+<style>
+/* SVG icon helper */
+.ico { display:inline-block; width:1em; height:1em; vertical-align:-0.15em; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+</style>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --teal: #1D9E75; --teal-l: #E1F5EE; --teal-m: #5DCAA5; --teal-d: #0F6E56;
+  --purple: #534AB7; --purple-l: #EEEDFE;
+  --coral: #D85A30; --coral-l: #FAECE7;
+  --amber: #BA7517; --amber-l: #FAEEDA;
+  --blue: #185FA5; --blue-l: #E6F1FB;
+  --bg: #F7F6F2; --bg2: #FFFFFF; --border: #D3D1C7;
+  --text: #2C2C2A; --text-m: #5F5E5A;
+}
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+.container { max-width: 600px; margin: 0 auto; padding: 1rem; }
+
+/* HERO */
+.hero { background: linear-gradient(135deg, #085041 0%, #1D9E75 55%, #5DCAA5 100%); padding: 1.75rem 1.5rem 1.5rem; border-radius: 16px; margin-bottom: 1.25rem; color: white; }
+.hero-badge { display: inline-block; background: rgba(255,255,255,.2); border-radius: 20px; padding: 3px 12px; font-size: .72rem; letter-spacing: .07em; margin-bottom: .6rem; text-transform: uppercase; }
+.hero h1 { font-size: 1.4rem; font-weight: 600; }
+.hero p { font-size: .84rem; opacity: .85; margin-top: .25rem; }
+
+/* KNOW-HOW */
+.knowhow { background: #FFF8E7; border: 1px solid #FAC775; border-radius: 14px; padding: .9rem 1.1rem; margin-bottom: 1.25rem; display: flex; gap: 10px; }
+.kh-icon { font-size: 20px; color: var(--amber); flex-shrink: 0; margin-top: 2px; }
+.kh-title { font-size: .8rem; font-weight: 600; color: var(--amber); margin-bottom: 4px; }
+.kh-text { font-size: .76rem; color: #633806; line-height: 1.6; }
+
+/* TABS */
+.tabs { display: flex; gap: 2px; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border); overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.tab { padding: .55rem .8rem; font-size: .78rem; border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; color: var(--text-m); white-space: nowrap; transition: all .15s; -webkit-tap-highlight-color: transparent; }
+.tab.active { color: var(--teal); border-bottom-color: var(--teal); font-weight: 600; }
+.tab i { font-size: 15px; vertical-align: -2px; margin-right: 3px; }
+
+/* PANELS */
+.panel { display: none; } .panel.active { display: block; }
+
+/* CARD */
+.card { background: var(--bg2); border: 1px solid var(--border); border-radius: 16px; padding: 1.1rem 1.25rem; margin-bottom: 1rem; }
+.stitle { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; margin-bottom: .9rem; display: flex; align-items: center; gap: 7px; }
+.stitle i { font-size: 16px; }
+
+/* ZONE TABS */
+.zone-tabs { display: flex; gap: 6px; margin-bottom: 1.1rem; }
+.ztab { flex: 1; padding: .5rem; text-align: center; border-radius: 10px; border: 1px solid var(--border); cursor: pointer; font-size: .8rem; background: var(--bg); color: var(--text-m); transition: all .15s; -webkit-tap-highlight-color: transparent; }
+.ztab i { font-size: 15px; vertical-align: -2px; margin-right: 3px; }
+.ztab.ac { background: var(--purple-l); color: var(--purple); border-color: var(--purple); font-weight: 600; }
+.ztab.al { background: var(--coral-l); color: var(--coral); border-color: var(--coral); font-weight: 600; }
+
+/* EVA */
+.eva-block { margin-bottom: 1.1rem; }
+.eva-moment-label { font-size: .82rem; font-weight: 600; color: var(--text); margin-bottom: .45rem; display: flex; align-items: center; gap: 6px; }
+.eva-moment-label i { font-size: 15px; color: var(--text-m); }
+.eva-row-outer { display: flex; align-items: center; gap: 10px; }
+.eva-track-wrap { flex: 1; }
+.eva-gradient-bar { height: 10px; border-radius: 5px; background: linear-gradient(to right, #2ECC71, #F1C40F 45%, #E67E22 70%, #E74C3C); margin-bottom: 6px; }
+.eva-slider { width: 100%; -webkit-appearance: none; appearance: none; height: 10px; border-radius: 5px; background: transparent; outline: none; cursor: pointer; margin-top: -10px; display: block; position: relative; z-index: 2; }
+.eva-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; border-radius: 50%; background: white; border: 2.5px solid #888; box-shadow: 0 2px 6px rgba(0,0,0,.2); cursor: pointer; }
+.eva-slider::-moz-range-thumb { width: 24px; height: 24px; border-radius: 50%; background: white; border: 2.5px solid #888; cursor: pointer; }
+.eva-examples { display: flex; justify-content: space-between; margin-top: 6px; }
+.eva-ex { text-align: center; font-size: .58rem; color: var(--text-m); line-height: 1.3; max-width: 56px; }
+.eva-ex span { display: block; font-size: .68rem; font-weight: 700; color: var(--text); }
+.eva-bubble { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1rem; font-weight: 700; color: white; flex-shrink: 0; transition: background .2s; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+
+/* EXERCISES */
+.ex-item { background: var(--bg); border-radius: 10px; padding: .7rem .9rem; margin-bottom: .65rem; border: 1px solid var(--border); }
+.ex-header { display: flex; align-items: center; gap: 8px; margin-bottom: .6rem; }
+.ex-name { font-size: .85rem; font-weight: 600; flex: 1; }
+.del-btn { background: none; border: none; cursor: pointer; color: var(--text-m); font-size: 18px; padding: 2px; line-height: 1; -webkit-tap-highlight-color: transparent; }
+.del-btn:hover, .del-btn:active { color: var(--coral); }
+.add-btn { display: flex; align-items: center; gap: 6px; padding: .55rem 1rem; border-radius: 10px; border: 1.5px dashed var(--border); background: none; cursor: pointer; font-size: .82rem; color: var(--teal); width: 100%; justify-content: center; transition: background .15s; margin-top: .5rem; }
+.add-btn:hover, .add-btn:active { background: var(--teal-l); }
+
+/* RPE */
+.rpe-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; margin: .7rem 0; }
+.rpe-cell { text-align: center; padding: .45rem .1rem; border-radius: 8px; border: 1px solid var(--border); cursor: pointer; transition: all .12s; background: var(--bg); -webkit-tap-highlight-color: transparent; }
+.rpe-num { font-size: .95rem; font-weight: 700; display: block; }
+.rpe-desc { font-size: .58rem; color: var(--text-m); line-height: 1.2; display: block; }
+.rpe-cell:hover, .rpe-cell:active { border-color: var(--teal); }
+.rpe-cell.sel { background: var(--teal); border-color: var(--teal); }
+.rpe-cell.sel .rpe-num, .rpe-cell.sel .rpe-desc { color: white; }
+
+/* NDI */
+.ndi-q { margin-bottom: .9rem; padding-bottom: .9rem; border-bottom: 1px solid var(--border); }
+.ndi-q:last-child { border-bottom: none; margin-bottom: 0; }
+.ndi-q-title { font-size: .84rem; font-weight: 600; margin-bottom: .5rem; }
+.ndi-options { display: flex; flex-direction: column; gap: 5px; }
+.ndi-opt { display: flex; align-items: flex-start; gap: 8px; padding: 6px 9px; border-radius: 10px; border: 1px solid var(--border); cursor: pointer; font-size: .78rem; transition: all .12s; background: var(--bg); -webkit-tap-highlight-color: transparent; }
+.ndi-opt:hover, .ndi-opt:active { background: var(--teal-l); border-color: var(--teal-m); }
+.ndi-opt.sel { background: var(--purple-l); border-color: var(--purple); }
+.ndi-opt-num { font-weight: 700; color: var(--teal); min-width: 14px; flex-shrink: 0; }
+.ndi-opt.sel .ndi-opt-num { color: var(--purple); }
+
+/* SLEEP */
+.sleep-q { margin-bottom: .9rem; }
+.sleep-q label { font-size: .8rem; color: var(--text-m); display: block; margin-bottom: .35rem; font-weight: 500; }
+.sleep-q select, .sleep-q input[type=time] { width: 100%; padding: 7px 10px; border-radius: 10px; border: 1px solid var(--border); font-size: .83rem; background: var(--bg); color: var(--text); }
+
+/* HISTORY */
+.hist-table { width: 100%; font-size: .79rem; border-collapse: collapse; }
+.hist-table th { text-align: left; padding: 6px 8px; color: var(--text-m); font-weight: 600; border-bottom: 1px solid var(--border); font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; }
+.hist-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); }
+.hist-table tr:last-child td { border-bottom: none; }
+.badge { display: inline-block; padding: 2px 9px; border-radius: 12px; font-size: .71rem; font-weight: 600; }
+.bl { background: var(--teal-l); color: var(--teal-d); }
+.bm { background: var(--amber-l); color: var(--amber); }
+.bh { background: var(--coral-l); color: var(--coral); }
+
+.sum-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 1rem; }
+.sum-card { background: var(--bg); border-radius: 10px; padding: .75rem; text-align: center; border: 1px solid var(--border); }
+.sum-val { font-size: 1.5rem; font-weight: 700; color: var(--teal); }
+.sum-lbl { font-size: .69rem; color: var(--text-m); margin-top: 2px; }
+
+/* SCORE BOX */
+.score-box { border-radius: 10px; padding: .9rem; text-align: center; margin-top: .9rem; }
+.score-num { font-size: 2.2rem; font-weight: 700; }
+.score-lbl { font-size: .8rem; margin-top: 4px; }
+
+/* BUTTONS */
+.save-btn { width: 100%; padding: .75rem; background: var(--teal); color: white; border: none; border-radius: 12px; cursor: pointer; font-size: .9rem; font-weight: 600; margin-top: .75rem; display: flex; align-items: center; justify-content: center; gap: 8px; transition: opacity .15s; -webkit-tap-highlight-color: transparent; }
+.save-btn:hover, .save-btn:active { opacity: .88; }
+.wa-btn { width: 100%; padding: .75rem; background: #25D366; color: white; border: none; border-radius: 12px; cursor: pointer; font-size: .9rem; font-weight: 600; margin-top: .5rem; display: flex; align-items: center; justify-content: center; gap: 8px; transition: opacity .15s; -webkit-tap-highlight-color: transparent; }
+.wa-btn:hover, .wa-btn:active { opacity: .88; }
+.wa-btn i, .save-btn i { font-size: 18px; }
+
+/* FORM FIELDS */
+.field-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: .85rem; }
+.field-group label { font-size: .78rem; color: var(--text-m); font-weight: 500; }
+.field-group input[type=number], .field-group input[type=time], .field-group select, .field-group textarea {
+  padding: 7px 10px; border-radius: 10px; border: 1px solid var(--border); font-size: .83rem; background: var(--bg); color: var(--text); width: 100%; font-family: inherit; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.date-row { display: flex; align-items: center; gap: 10px; margin-bottom: 1rem; }
+.date-row label { font-size: .8rem; color: var(--text-m); font-weight: 500; white-space: nowrap; }
+.date-row input[type=date] { padding: 6px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: .82rem; }
+
+.hist-empty { text-align: center; color: var(--text-m); font-size: .82rem; padding: 2.5rem 1rem; }
+.hist-empty i { font-size: 2.5rem; display: block; margin-bottom: .5rem; }
+
+/* MODAL */
+.modal-ov { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 300; align-items: center; justify-content: center; }
+.modal-ov.open { display: flex; }
+.modal { background: var(--bg2); border-radius: 18px; padding: 1.5rem; width: 90%; max-width: 340px; box-shadow: 0 8px 32px rgba(0,0,0,.15); }
+.modal h3 { font-size: 1rem; font-weight: 700; margin-bottom: .9rem; }
+.modal input[type=text] { width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border); font-size: .85rem; background: var(--bg); color: var(--text); margin-bottom: .75rem; font-family: inherit; }
+.modal-btns { display: flex; gap: 8px; }
+.modal-btns button { flex: 1; padding: .6rem; border-radius: 10px; border: 1px solid var(--border); cursor: pointer; font-size: .85rem; font-weight: 600; background: var(--bg); color: var(--text); }
+.modal-btns .ok { background: var(--teal); color: white; border-color: var(--teal); }
+
+/* TOAST */
+.toast { position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%) translateY(80px); background: #2C2C2A; color: white; padding: .65rem 1.25rem; border-radius: 30px; font-size: .82rem; font-weight: 500; z-index: 400; transition: transform .3s ease; white-space: nowrap; }
+.toast.show { transform: translateX(-50%) translateY(0); }
+
+@media (max-width: 400px) {
+  .two-col { grid-template-columns: 1fr; }
+  .sum-grid { grid-template-columns: 1fr; }
+  .tab { font-size: .72rem; padding: .5rem .6rem; }
+}
+</style>
+</head>
+<body>
+<!-- SVG sprite -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <symbol id="ic-edit" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></symbol>
+  <symbol id="ic-heart" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></symbol>
+  <symbol id="ic-spine" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="4" rx="1"/><rect x="9" y="9" width="6" height="4" rx="1"/><rect x="9" y="16" width="6" height="4" rx="1"/><line x1="12" y1="6" x2="12" y2="9"/><line x1="12" y1="13" x2="12" y2="16"/></symbol>
+  <symbol id="ic-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></symbol>
+  <symbol id="ic-chart" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></symbol>
+  <symbol id="ic-bulb" viewBox="0 0 24 24"><line x1="9" y1="18" x2="15" y2="18"/><line x1="10" y1="22" x2="14" y2="22"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></symbol>
+  <symbol id="ic-phone" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></symbol>
+  <symbol id="ic-calendar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></symbol>
+  <symbol id="ic-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 16"/><line x1="8" y1="12" x2="12" y2="8"/><line x1="16" y1="12" x2="12" y2="8"/></symbol>
+  <symbol id="ic-down" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 16"/><line x1="8" y1="16" x2="12" y2="16"/><line x1="16" y1="16" x2="12" y2="16"/></symbol>
+  <symbol id="ic-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></symbol>
+  <symbol id="ic-activity" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></symbol>
+  <symbol id="ic-flag" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></symbol>
+  <symbol id="ic-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+  <symbol id="ic-run" viewBox="0 0 24 24"><circle cx="13" cy="4" r="2"/><path d="M5 21l5-5-2-5 5-2 2 3h4"/><path d="M9 21l2-4"/></symbol>
+  <symbol id="ic-plus" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+  <symbol id="ic-trash" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></symbol>
+  <symbol id="ic-gauge" viewBox="0 0 24 24"><path d="M12 2a10 10 0 0 1 7.38 16.75"/><path d="M4.62 18.75A10 10 0 0 1 12 2"/><line x1="12" y1="12" x2="15" y2="9"/><circle cx="12" cy="12" r="1"/></symbol>
+  <symbol id="ic-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></symbol>
+  <symbol id="ic-wa" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></symbol>
+  <symbol id="ic-calc" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="8" y2="10"/><line x1="12" y1="10" x2="12" y2="10"/><line x1="16" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="8" y2="14"/><line x1="12" y1="14" x2="12" y2="14"/><line x1="16" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="12" y2="18"/></symbol>
+  <symbol id="ic-inbox" viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+</svg>
+
+<div class="container">
+
+<div class="hero">
+  <div class="hero-badge">Programa de seguimiento</div>
+  <h1>Mi diario de salud</h1>
+  <p>Registro de dolor, ejercicio y bienestar</p>
+</div>
+
+<div class="knowhow">
+  <svg class="ico" style="font-size:20px;color:var(--amber);flex-shrink:0;margin-top:2px;width:22px;height:22px"><use href="#ic-bulb"/></svg>
+  <div>
+    <div class="kh-title"><svg class="ico"><use href="#ic-phone"/></svg> Usa siempre el mismo móvil y navegador</div>
+    <div class="kh-text">Para conservar tu historial y ver tu evolución, abre este enlace <strong>siempre desde el mismo móvil y el mismo navegador</strong> (por ejemplo, Chrome de tu Android o Safari de tu iPhone). Si lo abres desde otro dispositivo o navegador, los registros anteriores no estarán visibles. No borres los datos de navegación de ese navegador.</div>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tab active" onclick="showPanel('registro')"><svg class="ico"><use href="#ic-edit"/></svg> Registro</button>
+  <button class="tab" onclick="showPanel('aerobico')"><svg class="ico"><use href="#ic-heart"/></svg> Aeróbico</button>
+  <button class="tab" onclick="showPanel('ndi')"><svg class="ico"><use href="#ic-spine"/></svg> NDI</button>
+  <button class="tab" onclick="showPanel('sueno')"><svg class="ico"><use href="#ic-moon"/></svg> Sueño</button>
+  <button class="tab" onclick="showPanel('historial')"><svg class="ico"><use href="#ic-chart"/></svg> Historial</button>
+</div>
+
+<!-- REGISTRO DIARIO -->
+<div id="panel-registro" class="panel active">
+  <div class="card">
+    <div class="date-row">
+      <label><svg class="ico" style="vertical-align:-2px"><use href="#ic-calendar"/></svg> Fecha</label>
+      <input type="date" id="reg-date">
+    </div>
+    <div class="zone-tabs">
+      <div class="ztab ac" id="ztab-c" onclick="setZone('c')"><svg class="ico"><use href="#ic-up"/></svg> Cervical</div>
+      <div class="ztab" id="ztab-l" onclick="setZone('l')"><svg class="ico"><use href="#ic-down"/></svg> Lumbar</div>
+    </div>
+    <div id="zone-c">
+      <div class="stitle" style="color:var(--purple)"><svg class="ico"><use href="#ic-up"/></svg> Zona cervical</div>
+      <div id="evas-c"></div>
+    </div>
+    <div id="zone-l" style="display:none">
+      <div class="stitle" style="color:var(--coral)"><svg class="ico"><use href="#ic-down"/></svg> Zona lumbar</div>
+      <div id="evas-l"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="stitle" style="color:var(--amber)"><svg class="ico"><use href="#ic-run"/></svg> Ejercicios y actividades del día</div>
+    <p style="font-size:.76rem;color:var(--text-m);margin-bottom:.75rem;line-height:1.5;">Evalúa con una EVA el dolor durante cada ejercicio o actividad cotidiana. Puedes añadir las que necesites.</p>
+    <div id="ex-list"></div>
+    <button class="add-btn" onclick="openModal()"><svg class="ico"><use href="#ic-plus"/></svg> Añadir ejercicio o actividad</button>
+  </div>
+
+  <button class="save-btn" onclick="saveRecord()"><svg class="ico"><use href="#ic-save"/></svg> Guardar registro del día</button>
+  <button class="wa-btn" onclick="sendRegistroWA()"><svg class="ico"><use href="#ic-wa"/></svg> Enviar resumen por WhatsApp</button>
+</div>
+
+<!-- AERÓBICO -->
+<div id="panel-aerobico" class="panel">
+  <div class="card">
+    <div class="stitle" style="color:var(--blue)"><svg class="ico"><use href="#ic-heart"/></svg> Sesión de ejercicio aeróbico</div>
+    <div class="date-row">
+      <label><svg class="ico" style="vertical-align:-2px"><use href="#ic-calendar"/></svg> Fecha</label>
+      <input type="date" id="aer-date">
+    </div>
+    <div class="field-group">
+      <label>Tipo de ejercicio</label>
+      <select id="aer-type">
+        <option>Caminar</option>
+        <option>Bicicleta estática</option>
+        <option>Natación</option>
+        <option>Elíptica</option>
+        <option>Otro</option>
+      </select>
+    </div>
+    <div class="two-col">
+      <div class="field-group"><label><svg class="ico" style="vertical-align:-2px"><use href="#ic-clock"/></svg> Duración (minutos)</label><input type="number" id="aer-min" min="0" max="300" placeholder="30"></div>
+      <div class="field-group"><label>Hora de inicio</label><input type="time" id="aer-time"></div>
+    </div>
+
+    <div class="stitle" style="color:var(--blue);margin-top:.2rem;"><svg class="ico"><use href="#ic-gauge"/></svg> Esfuerzo percibido (Escala RPE 6–20)</div>
+    <div class="rpe-grid" id="rpe-grid"></div>
+    <p style="font-size:.7rem;color:var(--text-m);margin-top:.4rem;line-height:1.6;background:var(--bg);padding:.6rem .8rem;border-radius:8px;border:1px solid var(--border);">
+      <strong>6</strong> Sentada en reposo · <strong>10</strong> Muy suave, puedo cantar · <strong>13</strong> Algo duro, puedo hablar · <strong>15</strong> Duro, frases cortas · <strong>17</strong> Muy duro, casi sin habla · <strong>20</strong> Esfuerzo máximo absoluto
+    </p>
+
+    <div style="margin-top:1rem;">
+      <div class="stitle" style="color:var(--blue);font-size:.69rem;"><svg class="ico"><use href="#ic-activity"/></svg> Dolor post sesión y a las 24h</div>
+      <div id="evas-aer"></div>
+    </div>
+
+    <div class="field-group"><label>Notas (opcional)</label><textarea id="aer-notes" rows="2" placeholder="¿Cómo te has sentado? ¿Algo que comentar?"></textarea></div>
+    <button class="save-btn" onclick="saveAerobic()"><svg class="ico"><use href="#ic-save"/></svg> Guardar sesión</button>
+    <button class="wa-btn" onclick="sendAerWA()"><svg class="ico"><use href="#ic-wa"/></svg> Enviar por WhatsApp</button>
+  </div>
+</div>
+
+<!-- NDI -->
+<div id="panel-ndi" class="panel">
+  <div class="card">
+    <div class="stitle" style="color:var(--purple)"><svg class="ico"><use href="#ic-spine"/></svg> Índice de discapacidad cervical (NDI)</div>
+    <p style="font-size:.76rem;color:var(--text-m);margin-bottom:.9rem;line-height:1.5;">Marca la opción que mejor describe cómo te has encontrado <strong>esta semana</strong>. Completa las 10 preguntas.</p>
+    <div id="ndi-qs"></div>
+    <div class="score-box" style="background:var(--purple-l);">
+      <div class="score-num" id="ndi-score" style="color:var(--purple);">0 %</div>
+      <div class="score-lbl" id="ndi-lbl" style="color:#3C3489;">Completa todas las preguntas para ver tu resultado</div>
+    </div>
+    <button class="save-btn" style="background:var(--purple)" onclick="saveNDI()"><svg class="ico"><use href="#ic-save"/></svg> Guardar NDI</button>
+    <button class="wa-btn" onclick="sendNDIWA()"><svg class="ico"><use href="#ic-wa"/></svg> Enviar resultado</button>
+  </div>
+</div>
+
+<!-- SUEÑO -->
+<div id="panel-sueno" class="panel">
+  <div class="card">
+    <div class="stitle" style="color:var(--purple)"><svg class="ico"><use href="#ic-moon"/></svg> Calidad del sueño (adaptado PSQI)</div>
+    <p style="font-size:.76rem;color:var(--text-m);margin-bottom:.9rem;line-height:1.5;">Indica cómo has dormido <strong>esta semana</strong> en general.</p>
+
+    <div class="sleep-q"><label>1. ¿A qué hora te acuestas habitualmente?</label><input type="time" id="sq-bed"></div>
+    <div class="sleep-q"><label>2. ¿Cuánto tardas en dormirte?</label>
+      <select id="sq-onset"><option value="0">Menos de 15 min</option><option value="1">15–30 min</option><option value="2">31–60 min</option><option value="3">Más de 60 min</option></select></div>
+    <div class="sleep-q"><label>3. ¿A qué hora te levantas normalmente?</label><input type="time" id="sq-wake"></div>
+    <div class="sleep-q"><label>4. ¿Cuántas horas duermes realmente?</label>
+      <select id="sq-hours"><option value="0">Más de 7 horas</option><option value="1">6–7 horas</option><option value="2">5–6 horas</option><option value="3">Menos de 5 horas</option></select></div>
+    <div class="sleep-q"><label>5. ¿Con qué frecuencia tienes dificultades para dormir?</label>
+      <select id="sq-dist"><option value="0">Nunca en el último mes</option><option value="1">Menos de 1 vez por semana</option><option value="2">1–2 veces por semana</option><option value="3">3 o más veces por semana</option></select></div>
+    <div class="sleep-q"><label>6. ¿El dolor cervical o lumbar te despierta por la noche?</label>
+      <select id="sq-pain"><option value="0">Nunca</option><option value="1">Alguna vez</option><option value="2">Frecuentemente</option><option value="3">Siempre</option></select></div>
+    <div class="sleep-q"><label>7. ¿Cómo valoras globalmente la calidad de tu sueño?</label>
+      <select id="sq-qual"><option value="0">Muy buena</option><option value="1">Buena</option><option value="2">Regular</option><option value="3">Muy mala</option></select></div>
+    <div class="sleep-q"><label>8. ¿Tomas medicación para dormir?</label>
+      <select id="sq-meds"><option value="0">Nunca</option><option value="1">Alguna vez</option><option value="2">Con frecuencia</option><option value="3">Siempre</option></select></div>
+    <div class="sleep-q"><label>9. ¿Te sientes cansada durante el día por dormir mal?</label>
+      <select id="sq-day"><option value="0">Nunca</option><option value="1">Alguna vez</option><option value="2">Con frecuencia</option><option value="3">Siempre</option></select></div>
+
+    <div class="score-box" style="background:var(--purple-l);">
+      <div class="score-num" id="sleep-score" style="color:var(--purple);">—</div>
+      <div class="score-lbl" id="sleep-lbl" style="color:#3C3489;">Pulsa calcular para ver tu resultado</div>
+    </div>
+    <button class="save-btn" style="background:var(--purple)" onclick="calcSleep()"><svg class="ico"><use href="#ic-calc"/></svg> Calcular puntuación</button>
+    <button class="wa-btn" onclick="sendSleepWA()"><svg class="ico"><use href="#ic-wa"/></svg> Enviar por WhatsApp</button>
+  </div>
+</div>
+
+<!-- HISTORIAL -->
+<div id="panel-historial" class="panel">
+  <div class="card">
+    <div class="stitle" style="color:var(--teal)"><svg class="ico"><use href="#ic-chart"/></svg> Tu evolución</div>
+    <div class="sum-grid">
+      <div class="sum-card"><div class="sum-val" id="sh-dias">0</div><div class="sum-lbl">Días registrados</div></div>
+      <div class="sum-card"><div class="sum-val" id="sh-aer">0</div><div class="sum-lbl">Sesiones aeróbicas</div></div>
+      <div class="sum-card"><div class="sum-val" id="sh-avgc">—</div><div class="sum-lbl">EVA cervical medio</div></div>
+      <div class="sum-card"><div class="sum-val" id="sh-avgl">—</div><div class="sum-lbl">EVA lumbar medio</div></div>
+    </div>
+    <div id="hist-list"></div>
+    <button class="save-btn" style="background:var(--coral);margin-top:.6rem;" onclick="clearAll()"><svg class="ico"><use href="#ic-trash"/></svg> Borrar todo el historial</button>
+  </div>
+</div>
+
+</div><!-- /container -->
+
+<!-- MODAL añadir ejercicio -->
+<div class="modal-ov" id="modal">
+  <div class="modal">
+    <h3><svg class="ico" style="color:var(--teal);vertical-align:-2px;margin-right:4px"><use href="#ic-plus"/></svg> Añadir ejercicio o actividad</h3>
+    <input type="text" id="modal-input" placeholder="Ej: Caminar 20 min, Subir escaleras, Colada…">
+    <div class="modal-btns">
+      <button onclick="closeModal()">Cancelar</button>
+      <button class="ok" onclick="confirmAdd()">Añadir</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+var records = [], aerRecords = [], ndiAnswers = {}, sleepScore = null, exercises = [], selectedRpe = null;
+
+var moments = [
+  { id:'pre',  label:'Antes del entrenamiento', icon:'ic-sun' },
+  { id:'dur',  label:'Durante el entrenamiento', icon:'ic-activity' },
+  { id:'post', label:'Justo al terminar',        icon:'ic-flag' },
+  { id:'h24',  label:'A las 24 horas',           icon:'ic-clock' }
+];
+var aerMoments = [
+  { id:'post', label:'Dolor post sesión',    icon:'ic-flag' },
+  { id:'h24',  label:'Dolor a las 24 horas', icon:'ic-clock' }
+];
+var evaExamples = [
+  { v:0,  t:'Sin dolor',    s:'Perfecta' },
+  { v:2,  t:'Muy leve',     s:'Casi no lo notas' },
+  { v:4,  t:'Leve',         s:'Puedes hacer todo' },
+  { v:6,  t:'Moderado',     s:'Limita algo' },
+  { v:8,  t:'Intenso',      s:'Difícil concentrarse' },
+  { v:10, t:'Máximo',       s:'Insoportable' }
+];
+var rpeData = [
+  {v:6,d:'Reposo'},{v:8,d:'Muy suave'},{v:10,d:'Suave'},{v:12,d:'Ligero'},
+  {v:13,d:'Algo duro'},{v:14,d:'Duro'},{v:15,d:'Duro+'},{v:16,d:'Muy duro'},
+  {v:17,d:'Muy duro+'},{v:20,d:'Máximo'}
+];
+var ndiData = [
+  {id:'n0',t:'1. Intensidad del dolor',opts:['Sin dolor en este momento','Dolor leve en este momento','Dolor moderado en este momento','Dolor intenso en este momento','Dolor muy intenso en este momento','El peor dolor imaginable']},
+  {id:'n1',t:'2. Cuidado personal (lavarse, vestirse…)',opts:['Puedo cuidarme sin dolor','Me cuesta pero no necesito ayuda','Es doloroso y lento, necesito algo de ayuda','Necesito ayuda diaria en casi todo','Me visto con mucha dificultad, permanezco en cama gran parte del tiempo','No puedo vestirme, permanezco en cama y necesito ayuda']},
+  {id:'n2',t:'3. Levantamiento de objetos',opts:['Puedo levantar objetos pesados sin dolor','Puedo levantarlos pero con algo de dolor','El dolor impide levantar objetos pesados del suelo','Solo puedo levantar objetos ligeros si están bien situados','Solo puedo levantar objetos muy ligeros','No puedo levantar ni mover ningún objeto']},
+  {id:'n3',t:'4. Lectura',opts:['Puedo leer todo lo que quiero sin dolor de cuello','Puedo leer todo lo que quiero con dolor leve','Puedo leer todo lo que quiero con dolor moderado','No puedo leer todo lo que quiero por dolor moderado','Apenas puedo leer por dolor intenso de cuello','No puedo leer nada']},
+  {id:'n4',t:'5. Cefalea (dolor de cabeza)',opts:['Sin dolor de cabeza','Dolores de cabeza leves e infrecuentes','Dolores de cabeza moderados e infrecuentes','Dolores de cabeza moderados y frecuentes','Dolores de cabeza intensos y frecuentes','Dolor de cabeza casi permanente']},
+  {id:'n5',t:'6. Concentración',opts:['Me puedo concentrar perfectamente cuando quiero','Me cuesta un poco concentrarme','Me resulta bastante difícil concentrarme','Me es muy difícil concentrarme','Apenas puedo concentrarme','No me puedo concentrar en absoluto']},
+  {id:'n6',t:'7. Trabajo y actividades cotidianas',opts:['Puedo trabajar todo lo que quiero','Solo puedo hacer mi trabajo habitual, nada más','Puedo hacer la mayor parte de mi trabajo habitual','No puedo hacer mi trabajo habitual','Apenas puedo hacer algún trabajo','No puedo hacer ningún trabajo']},
+  {id:'n7',t:'8. Conducción de vehículos',opts:['Puedo conducir sin dolor cervical','Puedo conducir todo lo que quiero con dolor leve','Puedo conducir todo lo que quiero con dolor moderado','No puedo conducir tanto como querría por el dolor','Apenas puedo conducir por dolor intenso de cuello','No puedo conducir en absoluto']},
+  {id:'n8',t:'9. Sueño',opts:['Sin problemas para dormir','El sueño se altera ligeramente (menos de 1h de insomnio)','El sueño se altera levemente (1–2h de insomnio)','El sueño se altera moderadamente (2–3h de insomnio)','El sueño se altera intensamente (3–5h de insomnio)','Prácticamente no puedo dormir (más de 5h de insomnio)']},
+  {id:'n9',t:'10. Actividades de ocio',opts:['Puedo participar sin ninguna limitación','Ligera limitación en actividades físicas intensas','Moderada limitación, solo hago actividades ligeras','Bastante limitada, apenas puedo hacer nada','Casi no puedo hacer ninguna actividad de ocio','No puedo hacer ninguna actividad de ocio']}
+];
+
+/* ---- COLOR ---- */
+function getColor(v) {
+  v = parseInt(v);
+  if (v <= 3) return lerp([46,204,113],[241,196,15], v/3);
+  if (v <= 6) return lerp([241,196,15],[230,126,34], (v-3)/3);
+  return lerp([230,126,34],[231,76,60], (v-6)/4);
+}
+function lerp(a,b,t) {
+  return 'rgb('+[0,1,2].map(function(i){ return Math.round(a[i]+(b[i]-a[i])*t); }).join(',')+')';
+}
+
+/* ---- EVA BUILDER ---- */
+function buildEvaBlock(uid, moment) {
+  var exHtml = evaExamples.map(function(e){
+    return '<div class="eva-ex"><span>'+e.v+'</span>'+e.t+'<br>'+e.s+'</div>';
+  }).join('');
+  return '<div class="eva-block">' +
+    '<div class="eva-moment-label"><svg class="ico" style="font-size:15px;color:var(--text-m);flex-shrink:0"><use href="#'+moment.icon+'"/></svg> '+moment.label+'</div>' +
+    '<div class="eva-row-outer">' +
+      '<div class="eva-track-wrap">' +
+        '<div class="eva-gradient-bar"></div>' +
+        '<input type="range" class="eva-slider" min="0" max="10" step="1" value="0" id="sl-'+uid+'" oninput="onEva(\''+uid+'\')">' +
+        '<div class="eva-examples">'+exHtml+'</div>' +
+      '</div>' +
+      '<div class="eva-bubble" id="bb-'+uid+'" style="background:#2ECC71">0</div>' +
+    '</div>' +
+  '</div>';
+}
+function onEva(uid) {
+  var v = document.getElementById('sl-'+uid).value;
+  var bb = document.getElementById('bb-'+uid);
+  bb.textContent = v;
+  bb.style.background = getColor(v);
+}
+function getEva(uid) { return parseInt(document.getElementById('sl-'+uid).value) || 0; }
+
+function buildZoneEvas(zone) {
+  document.getElementById('evas-'+zone).innerHTML =
+    moments.map(function(m){ return buildEvaBlock(zone+'-'+m.id, m); }).join('');
+}
+function buildAerEvas() {
+  document.getElementById('evas-aer').innerHTML =
+    aerMoments.map(function(m){ return buildEvaBlock('aer-'+m.id, m); }).join('');
+}
+
+/* ---- RPE ---- */
+function buildRpe() {
+  document.getElementById('rpe-grid').innerHTML = rpeData.map(function(r){
+    return '<div class="rpe-cell" onclick="selRpe('+r.v+')" data-v="'+r.v+'"><span class="rpe-num">'+r.v+'</span><span class="rpe-desc">'+r.d+'</span></div>';
+  }).join('');
+}
+function selRpe(v) {
+  selectedRpe = v;
+  document.querySelectorAll('.rpe-cell').forEach(function(c){
+    c.classList.toggle('sel', parseInt(c.dataset.v) === v);
+  });
+}
+
+/* ---- NDI ---- */
+function buildNDI() {
+  document.getElementById('ndi-qs').innerHTML = ndiData.map(function(q){
+    return '<div class="ndi-q"><div class="ndi-q-title">'+q.t+'</div><div class="ndi-options">'+
+      q.opts.map(function(o,i){
+        return '<div class="ndi-opt" id="'+q.id+'-'+i+'" onclick="selNDI(\''+q.id+'\','+i+')">'+
+          '<span class="ndi-opt-num">'+i+'</span><span>'+o+'</span></div>';
+      }).join('')+'</div></div>';
+  }).join('');
+}
+function selNDI(qid, val) {
+  ndiAnswers[qid] = val;
+  for (var i=0; i<6; i++) {
+    var el = document.getElementById(qid+'-'+i);
+    if (el) el.classList.toggle('sel', i===val);
+  }
+  var ans = Object.keys(ndiAnswers).length;
+  if (ans === 10) {
+    var tot = Object.values(ndiAnswers).reduce(function(a,b){return a+b;},0);
+    var pct = Math.round((tot/50)*100);
+    document.getElementById('ndi-score').textContent = pct+' %';
+    document.getElementById('ndi-lbl').textContent = ndiLabel(pct)+' — '+tot+'/50 puntos';
+  } else {
+    document.getElementById('ndi-score').textContent = ans+'/10';
+    document.getElementById('ndi-lbl').textContent = 'Preguntas completadas';
+  }
+}
+function ndiLabel(p) {
+  return p<=8 ? 'Sin discapacidad' : p<=28 ? 'Discapacidad leve' : p<=48 ? 'Discapacidad moderada' : p<=64 ? 'Discapacidad grave' : 'Discapacidad completa';
+}
+
+/* ---- ZONE / PANEL ---- */
+function setZone(z) {
+  document.getElementById('zone-c').style.display = z==='c' ? '' : 'none';
+  document.getElementById('zone-l').style.display = z==='l' ? '' : 'none';
+  document.getElementById('ztab-c').className = 'ztab'+(z==='c'?' ac':'');
+  document.getElementById('ztab-l').className = 'ztab'+(z==='l'?' al':'');
+}
+function showPanel(name) {
+  var panels = ['registro','aerobico','ndi','sueno','historial'];
+  panels.forEach(function(p){ document.getElementById('panel-'+p).classList.remove('active'); });
+  document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
+  document.getElementById('panel-'+name).classList.add('active');
+  document.querySelectorAll('.tab')[panels.indexOf(name)].classList.add('active');
+  if (name==='historial') renderHistory();
+}
+
+/* ---- EXERCISES ---- */
+function openModal() {
+  document.getElementById('modal').classList.add('open');
+  document.getElementById('modal-input').value = '';
+  setTimeout(function(){ document.getElementById('modal-input').focus(); }, 100);
+}
+function closeModal() { document.getElementById('modal').classList.remove('open'); }
+function confirmAdd() {
+  var n = document.getElementById('modal-input').value.trim();
+  if (!n) return;
+  exercises.push({ id: Date.now(), name: n, eva: 0 });
+  renderExercises();
+  closeModal();
+}
+function renderExercises() {
+  var list = document.getElementById('ex-list');
+  if (!exercises.length) { list.innerHTML = ''; return; }
+  var exHtml = evaExamples.map(function(e){
+    return '<div class="eva-ex"><span>'+e.v+'</span>'+e.t+'</div>';
+  }).join('');
+  list.innerHTML = exercises.map(function(ex){
+    return '<div class="ex-item" id="ex-'+ex.id+'">'+
+      '<div class="ex-header"><span class="ex-name">'+ex.name+'</span>'+
+      '<button class="del-btn" onclick="delEx('+ex.id+')" aria-label="Eliminar"><svg class="ico"><use href="#ic-trash"/></svg></button></div>'+
+      '<div style="display:flex;align-items:center;gap:10px;">'+
+        '<div style="flex:1">'+
+          '<div class="eva-gradient-bar"></div>'+
+          '<input type="range" class="eva-slider" min="0" max="10" step="1" value="'+ex.eva+'" id="ex-sl-'+ex.id+'" oninput="updateEx('+ex.id+',this.value)">'+
+          '<div class="eva-examples">'+exHtml+'</div>'+
+        '</div>'+
+        '<div class="eva-bubble" id="ex-bb-'+ex.id+'" style="background:#2ECC71">0</div>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+}
+function updateEx(id, v) {
+  var ex = exercises.find(function(e){ return e.id===id; });
+  if (ex) ex.eva = parseInt(v);
+  var bb = document.getElementById('ex-bb-'+id);
+  bb.textContent = v;
+  bb.style.background = getColor(v);
+}
+function delEx(id) {
+  exercises = exercises.filter(function(e){ return e.id!==id; });
+  renderExercises();
+}
+
+/* ---- SAVE REGISTRO ---- */
+function saveRecord() {
+  var rec = {
+    type: 'daily',
+    date: document.getElementById('reg-date').value,
+    c: { pre:getEva('c-pre'), dur:getEva('c-dur'), post:getEva('c-post'), h24:getEva('c-h24') },
+    l: { pre:getEva('l-pre'), dur:getEva('l-dur'), post:getEva('l-post'), h24:getEva('l-h24') },
+    exercises: exercises.map(function(e){ return {name:e.name,eva:e.eva}; })
+  };
+  records.push(rec);
+  saveLS();
+  toast('Registro guardado correctamente');
+}
+function sendRegistroWA() {
+  var d = document.getElementById('reg-date').value;
+  var msg = '📋 *REGISTRO DIARIO — '+d+'*\n\n';
+  msg += '🔵 *CERVICAL (EVA 0–10)*\n';
+  msg += 'Antes: '+getEva('c-pre')+'\nDurante: '+getEva('c-dur')+'\nPost: '+getEva('c-post')+'\n24h: '+getEva('c-h24')+'\n\n';
+  msg += '🔴 *LUMBAR (EVA 0–10)*\n';
+  msg += 'Antes: '+getEva('l-pre')+'\nDurante: '+getEva('l-dur')+'\nPost: '+getEva('l-post')+'\n24h: '+getEva('l-h24')+'\n';
+  if (exercises.length) {
+    msg += '\n🏋️ *EJERCICIOS*\n';
+    exercises.forEach(function(e){ msg += '• '+e.name+': EVA '+e.eva+'\n'; });
+  }
+  openLink('https://wa.me/34667751844?text='+encodeURIComponent(msg));
+}
+
+/* ---- SAVE AERÓBICO ---- */
+function saveAerobic() {
+  var rec = {
+    type: 'aerobic',
+    date: document.getElementById('aer-date').value,
+    exercise: document.getElementById('aer-type').value,
+    minutes: document.getElementById('aer-min').value,
+    rpe: selectedRpe,
+    post: getEva('aer-post'),
+    h24: getEva('aer-h24'),
+    notes: document.getElementById('aer-notes').value
+  };
+  aerRecords.push(rec);
+  saveLS();
+  toast('Sesión aeróbica guardada');
+}
+function sendAerWA() {
+  var msg = '🏃 *EJERCICIO AERÓBICO — '+document.getElementById('aer-date').value+'*\n\n';
+  msg += 'Ejercicio: '+document.getElementById('aer-type').value+'\n';
+  msg += 'Duración: '+document.getElementById('aer-min').value+' min\n';
+  msg += 'RPE: '+(selectedRpe||'—')+'/20\n';
+  msg += 'Dolor post sesión: '+getEva('aer-post')+'/10\n';
+  msg += 'Dolor 24h: '+getEva('aer-h24')+'/10\n';
+  if (document.getElementById('aer-notes').value) msg += 'Notas: '+document.getElementById('aer-notes').value;
+  openLink('https://wa.me/34667751844?text='+encodeURIComponent(msg));
+}
+
+/* ---- NDI SAVE ---- */
+function saveNDI() {
+  if (Object.keys(ndiAnswers).length < 10) { alert('Completa las 10 preguntas'); return; }
+  var tot = Object.values(ndiAnswers).reduce(function(a,b){return a+b;},0);
+  var pct = Math.round((tot/50)*100);
+  records.push({ type:'ndi', date:new Date().toISOString().split('T')[0], score:tot, pct:pct });
+  saveLS();
+  toast('NDI guardado: '+pct+'%');
+}
+function sendNDIWA() {
+  if (Object.keys(ndiAnswers).length < 10) { alert('Completa todas las preguntas primero'); return; }
+  var tot = Object.values(ndiAnswers).reduce(function(a,b){return a+b;},0);
+  var pct = Math.round((tot/50)*100);
+  var msg = '📊 *NDI — Índice de Discapacidad Cervical*\nFecha: '+new Date().toLocaleDateString('es-ES')+'\n\nPuntuación: '+tot+'/50 ('+pct+'%)\nNivel: '+ndiLabel(pct);
+  openLink('https://wa.me/34667751844?text='+encodeURIComponent(msg));
+}
+
+/* ---- SLEEP ---- */
+function calcSleep() {
+  var s = 0;
+  ['sq-onset','sq-hours','sq-dist','sq-pain','sq-qual','sq-meds','sq-day'].forEach(function(id){
+    s += parseInt(document.getElementById(id).value);
+  });
+  sleepScore = s;
+  document.getElementById('sleep-score').textContent = s+'/21';
+  var lbl = s<=5 ? 'Buena calidad de sueño' : s<=10 ? 'Alteración leve del sueño' : s<=15 ? 'Alteración moderada del sueño' : 'Alteración grave del sueño';
+  document.getElementById('sleep-lbl').textContent = lbl;
+  records.push({ type:'sleep', date:new Date().toISOString().split('T')[0], score:s });
+  saveLS();
+  toast('Puntuación del sueño guardada');
+}
+function sendSleepWA() {
+  if (sleepScore === null) { alert('Primero calcula tu puntuación'); return; }
+  var lbl = sleepScore<=5 ? 'Buena calidad' : sleepScore<=10 ? 'Alteración leve' : sleepScore<=15 ? 'Alteración moderada' : 'Alteración grave';
+  var msg = '🌙 *CALIDAD DEL SUEÑO*\nFecha: '+new Date().toLocaleDateString('es-ES')+'\n\nPuntuación: '+sleepScore+'/21\nResultado: '+lbl;
+  openLink('https://wa.me/34667751844?text='+encodeURIComponent(msg));
+}
+
+/* ---- HISTORY ---- */
+function renderHistory() {
+  var daily = records.filter(function(r){ return r.type==='daily'; });
+  document.getElementById('sh-dias').textContent = daily.length;
+  document.getElementById('sh-aer').textContent = aerRecords.length;
+  if (daily.length) {
+    var avgC = daily.reduce(function(a,r){ return a+(r.c.pre+r.c.post)/2; },0)/daily.length;
+    var avgL = daily.reduce(function(a,r){ return a+(r.l.pre+r.l.post)/2; },0)/daily.length;
+    document.getElementById('sh-avgc').textContent = avgC.toFixed(1);
+    document.getElementById('sh-avgl').textContent = avgL.toFixed(1);
+  }
+  var allRecs = records.slice().reverse();
+  var aerShow = aerRecords.slice().reverse();
+  var combined = records.map(function(r){ return r; }).concat(aerRecords).slice();
+  combined.sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
+  if (!combined.length) {
+    document.getElementById('hist-list').innerHTML = '<div class="hist-empty"><svg class="ico"><use href="#ic-inbox"/></svg>Aún no hay registros guardados.<br>Empieza registrando el dolor de hoy.</div>';
+    return;
+  }
+  var html = '<table class="hist-table"><thead><tr><th>Fecha</th><th>Tipo</th><th>Detalle</th></tr></thead><tbody>';
+  combined.slice(0,30).forEach(function(r){
+    if (r.type==='daily') {
+      var avg = ((r.c.pre+r.c.post+r.l.pre+r.l.post)/4).toFixed(1);
+      var bc = parseFloat(avg)<=3?'bl':parseFloat(avg)<=6?'bm':'bh';
+      html += '<tr><td>'+r.date+'</td><td>Dolor</td><td><span class="badge '+bc+'">EVA media: '+avg+'</span></td></tr>';
+    } else if (r.type==='aerobic') {
+      html += '<tr><td>'+r.date+'</td><td>Aeróbico</td><td>'+r.exercise+' · '+r.minutes+' min · RPE '+(r.rpe||'—')+'</td></tr>';
+    } else if (r.type==='ndi') {
+      var bc2 = r.pct<=28?'bl':r.pct<=48?'bm':'bh';
+      html += '<tr><td>'+r.date+'</td><td>NDI</td><td><span class="badge '+bc2+'">'+r.pct+'% ('+r.score+'/50)</span></td></tr>';
+    } else if (r.type==='sleep') {
+      var bc3 = r.score<=5?'bl':r.score<=10?'bm':'bh';
+      html += '<tr><td>'+r.date+'</td><td>Sueño</td><td><span class="badge '+bc3+'">'+r.score+'/21</span></td></tr>';
+    }
+  });
+  html += '</tbody></table>';
+  document.getElementById('hist-list').innerHTML = html;
+}
+function clearAll() {
+  if (!confirm('¿Seguro que quieres borrar todo el historial? Esta acción no se puede deshacer.')) return;
+  records = []; aerRecords = [];
+  saveLS();
+  renderHistory();
+  toast('Historial borrado');
+}
+
+/* ---- STORAGE ---- */
+function saveLS() {
+  try {
+    localStorage.setItem('rehab_rec', JSON.stringify(records));
+    localStorage.setItem('rehab_aer', JSON.stringify(aerRecords));
+  } catch(e) {}
+}
+function loadLS() {
+  try {
+    var r = localStorage.getItem('rehab_rec');
+    var a = localStorage.getItem('rehab_aer');
+    if (r) records = JSON.parse(r);
+    if (a) aerRecords = JSON.parse(a);
+  } catch(e) {}
+}
+
+/* ---- TOAST ---- */
+function toast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = '✓ '+msg;
+  t.classList.add('show');
+  setTimeout(function(){ t.classList.remove('show'); }, 2500);
+}
+
+/* ---- LINK ---- */
+function openLink(url) { window.open(url, '_blank'); }
+
+/* ---- INIT ---- */
+function init() {
+  var today = new Date().toISOString().split('T')[0];
+  document.getElementById('reg-date').value = today;
+  document.getElementById('aer-date').value = today;
+  buildZoneEvas('c');
+  buildZoneEvas('l');
+  buildAerEvas();
+  buildRpe();
+  buildNDI();
+  loadLS();
+  document.getElementById('modal-input').addEventListener('keydown', function(e){
+    if (e.key === 'Enter') confirmAdd();
+  });
+}
+init();
+</script>
+</body>
+</html>
