@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cuestionarios — Fernando Pérez Soler</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --blue:#1D5FAB;--blue-l:#E8F1FA;--blue-m:#B8D1EE;
+    --green:#1A7A4A;--green-l:#E6F5EE;
+    --amber:#9B6B00;--amber-l:#FFF8E6;
+    --red:#B82828;--red-l:#FEECEC;
+    --gray:#4A4A4A;--gray-l:#F5F5F3;--gray-m:#DADAD8;
+    --text:#1A1A1A;--text-m:#555;--text-s:#888;
+    --radius:12px;--radius-sm:8px;
+    --shadow:0 2px 16px rgba(0,0,0,.07);
+  }
+  body{font-family:'DM Sans',sans-serif;background:#F0EDE8;color:var(--text);min-height:100vh;padding:24px 16px 48px}
+  .page-wrap{max-width:720px;margin:0 auto}
+
+  /* HEADER */
+  .header{background:var(--blue);border-radius:var(--radius);padding:28px 32px;margin-bottom:24px;color:#fff}
+  .header h1{font-family:'Lora',serif;font-size:22px;font-weight:600;margin-bottom:6px}
+  .header p{font-size:14px;opacity:.85;line-height:1.5}
+  .header-meta{display:flex;gap:20px;margin-top:18px;flex-wrap:wrap}
+  .meta-item{font-size:12px;opacity:.7}
+  .meta-item strong{display:block;font-size:14px;opacity:1;font-weight:500;margin-bottom:1px}
+
+  /* INTRO NOTICE */
+  .notice{background:#fff;border:0.5px solid var(--gray-m);border-left:4px solid var(--blue);border-radius:var(--radius-sm);padding:16px 18px;margin-bottom:24px;font-size:14px;color:var(--gray);line-height:1.6}
+  .notice strong{color:var(--text)}
+
+  /* SECTION */
+  .section{background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);padding:28px 28px 24px;margin-bottom:20px}
+  .section-badge{display:inline-flex;align-items:center;gap:6px;background:var(--blue-l);color:var(--blue);font-size:11px;font-weight:500;padding:4px 10px;border-radius:20px;margin-bottom:14px}
+  .section h2{font-family:'Lora',serif;font-size:18px;font-weight:600;margin-bottom:6px;line-height:1.3}
+  .section-desc{font-size:13px;color:var(--text-m);margin-bottom:20px;line-height:1.6;border-bottom:1px solid var(--gray-l);padding-bottom:14px}
+
+  /* NDI ITEMS */
+  .ndi-item{margin-bottom:20px}
+  .ndi-item-title{font-size:14px;font-weight:500;margin-bottom:10px;color:var(--text)}
+  .ndi-item-num{display:inline-block;width:22px;height:22px;background:var(--blue);color:#fff;border-radius:50%;font-size:11px;text-align:center;line-height:22px;margin-right:6px;flex-shrink:0}
+  .options{display:flex;flex-direction:column;gap:5px}
+  .opt{display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border-radius:var(--radius-sm);cursor:pointer;border:1.5px solid var(--gray-m);transition:all .15s;background:#FAFAF9}
+  .opt:hover{border-color:var(--blue-m);background:var(--blue-l)}
+  .opt.selected{border-color:var(--blue);background:var(--blue-l)}
+  .opt input[type=radio]{accent-color:var(--blue);min-width:16px;margin-top:1px}
+  .opt label{font-size:13px;color:var(--gray);cursor:pointer;line-height:1.4}
+  .opt.selected label{color:var(--blue)}
+  .score-tag{margin-left:auto;font-size:11px;color:var(--text-s);white-space:nowrap;font-weight:500}
+
+  /* mJOA */
+  .mjoa-item{margin-bottom:24px}
+  .mjoa-label{font-size:14px;font-weight:500;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+  .mjoa-icon{font-size:18px}
+  .opt-mjoa{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:var(--radius-sm);cursor:pointer;border:1.5px solid var(--gray-m);margin-bottom:5px;transition:all .15s;background:#FAFAF9}
+  .opt-mjoa:hover{border-color:var(--blue-m);background:var(--blue-l)}
+  .opt-mjoa.selected{border-color:var(--blue);background:var(--blue-l)}
+  .opt-mjoa input[type=radio]{accent-color:var(--blue);min-width:16px;margin-top:2px}
+  .opt-mjoa label{font-size:13px;color:var(--gray);cursor:pointer;line-height:1.4}
+  .opt-mjoa.selected label{color:var(--blue)}
+  .pts{font-size:10px;background:var(--gray-l);color:var(--text-s);padding:2px 6px;border-radius:10px;white-space:nowrap;margin-left:auto}
+
+  /* EVA */
+  .eva-wrap{padding:10px 0 4px}
+  .eva-track{position:relative;margin:16px 0}
+  input[type=range]{width:100%;-webkit-appearance:none;appearance:none;height:10px;border-radius:10px;background:linear-gradient(to right,#1A7A4A,#F0A500,#B82828);outline:none;cursor:pointer}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:28px;height:28px;border-radius:50%;background:#fff;border:3px solid var(--blue);cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+  input[type=range]::-moz-range-thumb{width:28px;height:28px;border-radius:50%;background:#fff;border:3px solid var(--blue);cursor:pointer}
+  .eva-labels{display:flex;justify-content:space-between;font-size:12px;color:var(--text-s);margin-top:4px}
+  .eva-value{text-align:center;font-size:40px;font-weight:300;font-family:'Lora',serif;color:var(--blue);margin:12px 0 4px}
+  .eva-desc{text-align:center;font-size:13px;color:var(--text-m);margin-bottom:6px}
+  .eva-legend{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:12px}
+  .eva-leg-item{border-radius:var(--radius-sm);padding:8px;text-align:center;font-size:11px;line-height:1.3}
+
+  /* RESULTADOS */
+  #resultados{display:none}
+  .result-card{background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);padding:24px 28px;margin-bottom:16px}
+  .result-card h3{font-family:'Lora',serif;font-size:16px;margin-bottom:16px;color:var(--text)}
+  .score-display{display:flex;align-items:center;gap:16px;margin-bottom:12px;flex-wrap:wrap}
+  .score-big{font-size:48px;font-weight:300;font-family:'Lora',serif;line-height:1}
+  .score-detail{font-size:13px;color:var(--text-m);line-height:1.6}
+  .score-bar{height:12px;border-radius:10px;background:var(--gray-l);overflow:hidden;margin-bottom:8px}
+  .score-fill{height:100%;border-radius:10px;transition:width .5s}
+  .severity{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:500;padding:4px 12px;border-radius:20px;margin-top:4px}
+  .sev-mild{background:var(--green-l);color:var(--green)}
+  .sev-mod{background:var(--amber-l);color:var(--amber)}
+  .sev-severe{background:var(--red-l);color:var(--red)}
+  .result-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:12px}
+  .result-sub{background:var(--gray-l);border-radius:var(--radius-sm);padding:10px 12px}
+  .result-sub-lbl{font-size:11px;color:var(--text-s);margin-bottom:2px}
+  .result-sub-val{font-size:18px;font-weight:500}
+  .disclaimer{font-size:12px;color:var(--text-s);background:var(--amber-l);border-radius:var(--radius-sm);padding:10px 14px;margin-top:12px;line-height:1.5;border-left:3px solid #F0A500}
+  .copy-block{background:var(--gray-l);border-radius:var(--radius-sm);padding:14px;font-size:12px;font-family:monospace;white-space:pre-wrap;line-height:1.7;margin-top:12px;border:1px solid var(--gray-m)}
+  .copy-block strong{color:var(--blue)}
+
+  /* BOTONES */
+  .btn-wrap{margin-top:24px;display:flex;gap:10px;flex-wrap:wrap}
+  .btn{padding:14px 28px;border-radius:var(--radius-sm);font-size:15px;font-weight:500;font-family:'DM Sans',sans-serif;cursor:pointer;border:none;transition:all .15s}
+  .btn-primary{background:var(--blue);color:#fff}
+  .btn-primary:hover{background:#174F8E}
+  .btn-secondary{background:#fff;color:var(--blue);border:1.5px solid var(--blue-m)}
+  .btn-secondary:hover{background:var(--blue-l)}
+  .progress-wrap{background:var(--blue-l);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:20px;font-size:13px;color:var(--blue)}
+  .progress-bar{height:6px;background:var(--blue-m);border-radius:10px;margin-top:8px;overflow:hidden}
+  .progress-fill{height:100%;background:var(--blue);border-radius:10px;transition:width .3s}
+  @media(max-width:500px){
+    .section{padding:20px 16px 18px}
+    .header{padding:20px 18px}
+    .score-big{font-size:36px}
+    body{padding:12px 10px 36px}
+  }
+  @media print{
+    body{background:#fff;padding:0}
+    .btn-wrap{display:none}
+    .section,.result-card{box-shadow:none;border:1px solid #ddd}
+    .header{background:var(--blue) !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  }
+</style>
+</head>
+<body>
+<div class="page-wrap">
+
+<div class="header">
+  <h1>Cuestionarios de salud</h1>
+  <p>Por favor, responda cada pregunta con sinceridad. No hay respuestas correctas o incorrectas. Sus respuestas ayudarán a su fisioterapeuta a diseñar el mejor programa de rehabilitación para usted.</p>
+  <div class="header-meta">
+    <div class="meta-item"><strong>Fernando Pérez Soler</strong>Paciente</div>
+    <div class="meta-item"><strong id="fecha-display">—</strong>Fecha de hoy</div>
+    <div class="meta-item"><strong>Clínica fisioterapia</strong>Vicente Muñoz</div>
+  </div>
+</div>
+
+<div class="notice">
+  <strong>Instrucciones generales:</strong> Hay 3 cuestionarios breves. Tómese el tiempo que necesite. Si alguna pregunta no le afecta (por ejemplo, conducir si no conduce), marque la opción que mejor describa su situación general. Al terminar, pulse el botón verde para ver sus resultados.
+</div>
+
+<div class="progress-wrap" id="progress-wrap">
+  <span id="progress-text">Completadas: <strong>0 de 16 preguntas</strong></span>
+  <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+</div>
+
+<!-- ===== NDI ===== -->
+<div class="section" id="sec-ndi">
+  <div class="section-badge">Cuestionario 1 de 3</div>
+  <h2>Índice de Discapacidad del Cuello (NDI)</h2>
+  <p class="section-desc">Las siguientes preguntas están diseñadas para conocer cuánto le afecta el dolor de cuello en su vida diaria. Por favor, <strong>marque UNA sola respuesta</strong> en cada pregunta: la que mejor describe su situación <strong>hoy</strong>.</p>
+
+  <!-- P1 -->
+  <div class="ndi-item">
+    <div class="ndi-item-title"><span class="ndi-item-num">1</span>Intensidad del dolor de cuello</div>
+    <div class="options">
+      <div class="opt" onclick="selectOpt(this,'ndi',0,0)"><input type="radio" name="ndi0" value="0"><label>No tengo ningún dolor en este momento</label><span class="score-tag">0</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',0,1)"><input type="radio" name="ndi0" value="1"><label>El dolor es muy leve en este momento</label><span class="score-tag">1</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',0,2)"><input type="radio" name="ndi0" value="2"><label>El dolor es moderado en este momento</label><span class="score-tag">2</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',0,3)"><input type="radio" name="ndi0" value="3"><label>El dolor es bastante intenso en este momento</label><span class="score-tag">3</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',0,4)"><input type="radio" name="ndi0" value="4"><label>El dolor es muy intenso en este momento</label><span class="score-tag">4</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',0,5)"><input type="radio" name="ndi0" value="5"><label>El dolor es el peor imaginable en este momento</label><span class="score-tag">5</span></div>
+    </div>
+  </div>
+
+  <!-- P2 -->
+  <div class="ndi-item">
+    <div class="ndi-item-title"><span class="ndi-item-num">2</span>Cuidado personal (lavarse, vestirse, etc.)</div>
+    <div class="options">
+      <div class="opt" onclick="selectOpt(this,'ndi',1,0)"><input type="radio" name="ndi1" value="0"><label>Puedo cuidarme con normalidad sin que me aumente el dolor</label><span class="score-tag">0</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',1,1)"><input type="radio" name="ndi1" value="1"><label>Puedo cuidarme con normalidad, pero me aumenta el dolor</label><span class="score-tag">1</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',1,2)"><input type="radio" name="ndi1" value="2"><label>Es doloroso cuidarme y soy lento y cuidadoso</label><span class="score-tag">2</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',1,3)"><input type="radio" name="ndi1" value="3"><label>Necesito algo de ayuda, pero me hago cargo de la mayor parte de mi cuidado personal</label><span class="score-tag">3</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',1,4)"><input type="radio" name="ndi1" value="4"><label>Necesito ayuda cada día en la mayoría de los aspectos de mi cuidado personal</label><span class="score-tag">4</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',1,5)"><input type="radio" name="ndi1" value="5"><label>No me puedo vestir, me lavo con dificultad y me quedo en la cama</label><span class="score-tag">5</span></div>
+    </div>
+  </div>
+
+  <!-- P3 -->
+  <div class="ndi-item">
+    <div class="ndi-item-title"><span class="ndi-item-num">3</span>Levantar objetos</div>
+    <div class="options">
+      <div class="opt" onclick="selectOpt(this,'ndi',2,0)"><input type="radio" name="ndi2" value="0"><label>Puedo levantar objetos pesados sin que me aumente el dolor</label><span class="score-tag">0</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',2,1)"><input type="radio" name="ndi2" value="1"><label>Puedo levantar objetos pesados pero me aumenta el dolor</label><span class="score-tag">1</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',2,2)"><input type="radio" name="ndi2" value="2"><label>El dolor me impide levantar objetos pesados del suelo pero sí del una superficie conveniente</label><span class="score-tag">2</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',2,3)"><input type="radio" name="ndi2" value="3"><label>El dolor me impide levantar objetos pesados pero sí puedo levantar objetos ligeros o medianos si están en un lugar conveniente</label><span class="score-tag">3</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',2,4)"><input type="radio" name="ndi2" value="4"><label>Solo puedo levantar objetos muy ligeros</label><span class="score-tag">4</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',2,5)"><input type="radio" name="ndi2" value="5"><label>No puedo levantar ni llevar nada</label><span class="score-tag">5</span></div>
+    </div>
+  </div>
+
+  <!-- P4 -->
+  <div class="ndi-item">
+    <div class="ndi-item-title"><span class="ndi-item-num">4</span>Leer</div>
+    <div class="options">
+      <div class="opt" onclick="selectOpt(this,'ndi',3,0)"><input type="radio" name="ndi3" value="0"><label>Puedo leer todo lo que quiero sin que me duela el cuello</label><span class="score-tag">0</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',3,1)"><input type="radio" name="ndi3" value="1"><label>Puedo leer todo lo que quiero pero me molesta un poco el cuello</label><span class="score-tag">1</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',3,2)"><input type="radio" name="ndi3" value="2"><label>Puedo leer todo lo que quiero pero me molesta bastante el cuello</label><span class="score-tag">2</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',3,3)"><input type="radio" name="ndi3" value="3"><label>No puedo leer todo lo que quiero porque me molesta bastante el cuello</label><span class="score-tag">3</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',3,4)"><input type="radio" name="ndi3" value="4"><label>Apenas puedo leer porque me duele mucho el cuello</label><span class="score-tag">4</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',3,5)"><input type="radio" name="ndi3" value="5"><label>No puedo leer nada</label><span class="score-tag">5</span></div>
+    </div>
+  </div>
+
+  <!-- P5 -->
+  <div class="ndi-item">
+    <div class="ndi-item-title"><span class="ndi-item-num">5</span>Dolor de cabeza</div>
+    <div class="options">
+      <div class="opt" onclick="selectOpt(this,'ndi',4,0)"><input type="radio" name="ndi4" value="0"><label>No tengo ningún dolor de cabeza</label><span class="score-tag">0</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',4,1)"><input type="radio" name="ndi4" value="1"><label>Tengo dolores de cabeza leves que aparecen con poca frecuencia</label><span class="score-tag">1</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',4,2)"><input type="radio" name="ndi4" value="2"><label>Tengo dolores de cabeza moderados que aparecen con poca frecuencia</label><span class="score-tag">2</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',4,3)"><input type="radio" name="ndi4" value="3"><label>Tengo dolores de cabeza moderados que aparecen con bastante frecuencia</label><span class="score-tag">3</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',4,4)"><input type="radio" name="ndi4" value="4"><label>Tengo dolores de cabeza intensos que aparecen con bastante frecuencia</label><span class="score-tag">4</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',4,5)"><input type="radio" name="ndi4" value="5"><label>Tengo dolores de cabeza casi constantemente</label><span class="score-tag">5</span></div>
+    </div>
+  </div>
+
+  <!-- P6 -->
+  <div class="ndi-item">
+    <div class="ndi-item-title"><span class="ndi-item-num">6</span>Concentración</div>
+    <div class="options">
+      <div class="opt" onclick="selectOpt(this,'ndi',5,0)"><input type="radio" name="ndi5" value="0"><label>Me puedo concentrar con normalidad sin dificultades</label><span class="score-tag">0</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',5,1)"><input type="radio" name="ndi5" value="1"><label>Me puedo concentrar con normalidad, pero con ligeras dificultades</label><span class="score-tag">1</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',5,2)"><input type="radio" name="ndi5" value="2"><label>Tengo alguna dificultad para concentrarme</label><span class="score-tag">2</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',5,3)"><input type="radio" name="ndi5" value="3"><label>Tengo bastante dificultad para concentrarme</label><span class="score-tag">3</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',5,4)"><input type="radio" name="ndi5" value="4"><label>Tengo mucha dificultad para concentrarme</label><span class="score-tag">4</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',5,5)"><input type="radio" name="ndi5" value="5"><label>No me puedo concentrar en absoluto</label><span class="score-tag">5</span></div>
+    </div>
+  </div>
+
+  <!-- P7 -->
+  <div class="ndi-item">
+    <div class="ndi-item-title"><span class="ndi-item-num">7</span>Trabajo (actividad laboral o tareas del hogar)</div>
+    <div class="options">
+      <div class="opt" onclick="selectOpt(this,'ndi',6,0)"><input type="radio" name="ndi6" value="0"><label>Puedo trabajar todo lo que quiero</label><span class="score-tag">0</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',6,1)"><input type="radio" name="ndi6" value="1"><label>Solo puedo hacer mi trabajo habitual pero no más</label><span class="score-tag">1</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',6,2)"><input type="radio" name="ndi6" value="2"><label>Puedo hacer la mayor parte de mi trabajo habitual pero no más</label><span class="score-tag">2</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',6,3)"><input type="radio" name="ndi6" value="3"><label>No puedo hacer mi trabajo habitual</label><span class="score-tag">3</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',6,4)"><input type="radio" name="ndi6" value="4"><label>Apenas puedo hacer algún trabajo</label><span class="score-tag">4</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',6,5)"><input type="radio" name="ndi6" value="5"><label>No puedo hacer ningún tipo de trabajo</label><span class="score-tag">5</span></div>
+    </div>
+  </div>
+
+  <!-- P8 -->
+  <div class="ndi-item">
+    <div class="ndi-item-title"><span class="ndi-item-num">8</span>Conducir (si no conduce, piense en ir como pasajero)</div>
+    <div class="options">
+      <div class="opt" onclick="selectOpt(this,'ndi',7,0)"><input type="radio" name="ndi7" value="0"><label>Puedo conducir sin ningún dolor en el cuello</label><span class="score-tag">0</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',7,1)"><input type="radio" name="ndi7" value="1"><label>Puedo conducir el tiempo que quiero con ligero dolor en el cuello</label><span class="score-tag">1</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',7,2)"><input type="radio" name="ndi7" value="2"><label>Puedo conducir el tiempo que quiero con dolor moderado en el cuello</label><span class="score-tag">2</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',7,3)"><input type="radio" name="ndi7" value="3"><label>No puedo conducir el tiempo que quiero porque me duele bastante el cuello</label><span class="score-tag">3</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',7,4)"><input type="radio" name="ndi7" value="4"><label>Apenas puedo conducir porque me duele muchísimo el cuello</label><span class="score-tag">4</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',7,5)"><input type="radio" name="ndi7" value="5"><label>No puedo conducir porque me duele muchísimo el cuello</label><span class="score-tag">5</span></div>
+    </div>
+  </div>
+
+  <!-- P9 -->
+  <div class="ndi-item">
+    <div class="ndi-item-title"><span class="ndi-item-num">9</span>Dormir</div>
+    <div class="options">
+      <div class="opt" onclick="selectOpt(this,'ndi',8,0)"><input type="radio" name="ndi8" value="0"><label>No tengo ningún problema para dormir</label><span class="score-tag">0</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',8,1)"><input type="radio" name="ndi8" value="1"><label>Mi sueño se altera ligeramente (menos de 1 hora de insomnio)</label><span class="score-tag">1</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',8,2)"><input type="radio" name="ndi8" value="2"><label>Mi sueño se altera ligeramente (1-2 horas de insomnio)</label><span class="score-tag">2</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',8,3)"><input type="radio" name="ndi8" value="3"><label>Mi sueño se altera moderadamente (2-3 horas de insomnio)</label><span class="score-tag">3</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',8,4)"><input type="radio" name="ndi8" value="4"><label>Mi sueño se altera bastante (3-5 horas de insomnio)</label><span class="score-tag">4</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',8,5)"><input type="radio" name="ndi8" value="5"><label>Mi sueño se altera totalmente (5-7 horas de insomnio)</label><span class="score-tag">5</span></div>
+    </div>
+  </div>
+
+  <!-- P10 -->
+  <div class="ndi-item">
+    <div class="ndi-item-title"><span class="ndi-item-num">10</span>Ocio y actividades de tiempo libre</div>
+    <div class="options">
+      <div class="opt" onclick="selectOpt(this,'ndi',9,0)"><input type="radio" name="ndi9" value="0"><label>Soy capaz de realizar todas mis actividades de ocio sin ningún dolor de cuello</label><span class="score-tag">0</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',9,1)"><input type="radio" name="ndi9" value="1"><label>Soy capaz de realizar todas mis actividades de ocio con algún dolor de cuello</label><span class="score-tag">1</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',9,2)"><input type="radio" name="ndi9" value="2"><label>Soy capaz de realizar la mayoría pero no todas mis actividades de ocio por el dolor de cuello</label><span class="score-tag">2</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',9,3)"><input type="radio" name="ndi9" value="3"><label>Soy capaz de realizar solo algunas de mis actividades de ocio por el dolor de cuello</label><span class="score-tag">3</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',9,4)"><input type="radio" name="ndi9" value="4"><label>Apenas puedo realizar ninguna actividad de ocio por el dolor de cuello</label><span class="score-tag">4</span></div>
+      <div class="opt" onclick="selectOpt(this,'ndi',9,5)"><input type="radio" name="ndi9" value="5"><label>No puedo realizar ninguna actividad de ocio</label><span class="score-tag">5</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== mJOA ===== -->
+<div class="section" id="sec-mjoa">
+  <div class="section-badge">Cuestionario 2 de 3</div>
+  <h2>Escala de función neurológica (mJOA)</h2>
+  <p class="section-desc">Esta escala evalúa cómo funcionan su cuerpo y sus extremidades. Por favor, marque la opción que <strong>mejor describe lo que puede hacer HOY</strong>, en este momento.</p>
+
+  <!-- mJOA 1: Motor MS -->
+  <div class="mjoa-item">
+    <div class="mjoa-label"><span class="mjoa-icon">🤲</span>Uso de las manos y brazos (manos, dedos, abrocharse botones, escribir)</div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',0,4)"><input type="radio" name="mjoa0" value="4"><label>Normal: uso las manos con total normalidad</label><span class="pts">4 pts</span></div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',0,3)"><input type="radio" name="mjoa0" value="3"><label>Leve dificultad: tengo algo de dificultad usando palillos, abrochando botones o escribiendo</label><span class="pts">3 pts</span></div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',0,2)"><input type="radio" name="mjoa0" value="2"><label>Moderada: puedo comer con cuchara y tenedor, pero los palillos me resultan muy difíciles; me cuesta abrocharme botones</label><span class="pts">2 pts</span></div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',0,1)"><input type="radio" name="mjoa0" value="1"><label>Severa: puedo mover los dedos pero no puedo comer con cubiertos con normalidad ni abrocharme botones</label><span class="pts">1 pt</span></div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',0,0)"><input type="radio" name="mjoa0" value="0"><label>No puedo usar las manos ni los dedos</label><span class="pts">0 pts</span></div>
+  </div>
+
+  <!-- mJOA 2: Motor MI -->
+  <div class="mjoa-item">
+    <div class="mjoa-label"><span class="mjoa-icon">🦵</span>Caminar (piernas, equilibrio, subir escaleras)</div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',1,4)"><input type="radio" name="mjoa1" value="4"><label>Normal: camino sin ningún problema</label><span class="pts">4 pts</span></div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',1,3)"><input type="radio" name="mjoa1" value="3"><label>Leve: camino solo pero un poco más lento o inestable de lo habitual</label><span class="pts">3 pts</span></div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',1,2)"><input type="radio" name="mjoa1" value="2"><label>Moderada: puedo caminar solo en terreno llano pero necesito apoyo en escaleras</label><span class="pts">2 pts</span></div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',1,1)"><input type="radio" name="mjoa1" value="1"><label>Severa: necesito bastón o apoyo de otra persona para caminar incluso en llano</label><span class="pts">1 pt</span></div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',1,0)"><input type="radio" name="mjoa1" value="0"><label>No puedo caminar</label><span class="pts">0 pts</span></div>
+  </div>
+
+  <!-- mJOA 3: Sensitivo MS -->
+  <div class="mjoa-item">
+    <div class="mjoa-label"><span class="mjoa-icon">✋</span>Sensibilidad en manos y brazos</div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',2,2)"><input type="radio" name="mjoa2" value="2"><label>Normal: siento con normalidad en manos y brazos</label><span class="pts">2 pts</span></div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',2,1)"><input type="radio" name="mjoa2" value="1"><label>Leve pérdida: siento hormigueo, adormecimiento o sensaciones raras leves en manos o brazos</label><span class="pts">1 pt</span></div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',2,0)"><input type="radio" name="mjoa2" value="0"><label>Pérdida importante de sensibilidad o dolor intenso en manos/brazos</label><span class="pts">0 pts</span></div>
+  </div>
+
+  <!-- mJOA 4: Sensitivo tronco/MI -->
+  <div class="mjoa-item">
+    <div class="mjoa-label"><span class="mjoa-icon">🦶</span>Sensibilidad en piernas y tronco</div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',3,2)"><input type="radio" name="mjoa3" value="2"><label>Normal: siento con normalidad en piernas y tronco</label><span class="pts">2 pts</span></div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',3,1)"><input type="radio" name="mjoa3" value="1"><label>Leve pérdida: siento hormigueo, adormecimiento o sensaciones raras leves en piernas o tronco</label><span class="pts">1 pt</span></div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',3,0)"><input type="radio" name="mjoa3" value="0"><label>Pérdida importante de sensibilidad o dolor intenso en piernas/tronco</label><span class="pts">0 pts</span></div>
+  </div>
+
+  <!-- mJOA 5: Vejiga -->
+  <div class="mjoa-item">
+    <div class="mjoa-label"><span class="mjoa-icon">💧</span>Control de la vejiga (orinar)</div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',4,3)"><input type="radio" name="mjoa4" value="3"><label>Normal: controlo perfectamente la orina</label><span class="pts">3 pts</span></div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',4,2)"><input type="radio" name="mjoa4" value="2"><label>Ligera dificultad: a veces tengo urgencia para orinar o voy más al baño de lo habitual</label><span class="pts">2 pts</span></div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',4,1)"><input type="radio" name="mjoa4" value="1"><label>Bastante dificultad para orinar o a veces se me escapa la orina</label><span class="pts">1 pt</span></div>
+    <div class="opt-mjoa" onclick="selectOpt(this,'mjoa',4,0)"><input type="radio" name="mjoa4" value="0"><label>No controlo la orina o necesito sonda</label><span class="pts">0 pts</span></div>
+  </div>
+</div>
+
+<!-- ===== EVA ===== -->
+<div class="section" id="sec-eva">
+  <div class="section-badge">Cuestionario 3 de 3</div>
+  <h2>Nivel de dolor en este momento</h2>
+  <p class="section-desc">Mueva el deslizador hasta el número que mejor describe su dolor <strong>ahora mismo</strong>. El 0 significa sin dolor y el 10 significa el peor dolor imaginable.</p>
+  <div class="eva-wrap">
+    <div class="eva-value" id="eva-val">5</div>
+    <div class="eva-desc" id="eva-desc">Dolor moderado</div>
+    <div class="eva-track">
+      <input type="range" min="0" max="10" step="1" value="5" id="eva-slider" oninput="updateEVA(this.value)">
+    </div>
+    <div class="eva-labels"><span>0 — Sin dolor</span><span>5 — Moderado</span><span>10 — Máximo</span></div>
+    <div class="eva-legend">
+      <div class="eva-leg-item" style="background:var(--green-l);color:var(--green)"><strong>0–3</strong><br>Leve o sin dolor</div>
+      <div class="eva-leg-item" style="background:var(--amber-l);color:var(--amber)"><strong>4–6</strong><br>Moderado</div>
+      <div class="eva-leg-item" style="background:var(--red-l);color:var(--red)"><strong>7–10</strong><br>Intenso</div>
+    </div>
+  </div>
+  <div style="margin-top:18px">
+    <p style="font-size:14px;font-weight:500;margin-bottom:10px;color:var(--text)">¿Dónde siente principalmente el dolor? (puede marcar varias)</p>
+    <div style="display:flex;flex-wrap:wrap;gap:8px" id="dolor-loc">
+      <label class="loc-tag" onclick="toggleLoc(this)"><input type="checkbox" style="display:none">Cuello</label>
+      <label class="loc-tag" onclick="toggleLoc(this)"><input type="checkbox" style="display:none">Hombros</label>
+      <label class="loc-tag" onclick="toggleLoc(this)"><input type="checkbox" style="display:none">Brazo derecho</label>
+      <label class="loc-tag" onclick="toggleLoc(this)"><input type="checkbox" style="display:none">Brazo izquierdo</label>
+      <label class="loc-tag" onclick="toggleLoc(this)"><input type="checkbox" style="display:none">Mano derecha</label>
+      <label class="loc-tag" onclick="toggleLoc(this)"><input type="checkbox" style="display:none">Mano izquierda</label>
+      <label class="loc-tag" onclick="toggleLoc(this)"><input type="checkbox" style="display:none">Pierna derecha</label>
+      <label class="loc-tag" onclick="toggleLoc(this)"><input type="checkbox" style="display:none">Pierna izquierda</label>
+      <label class="loc-tag" onclick="toggleLoc(this)"><input type="checkbox" style="display:none">Sin dolor</label>
+    </div>
+  </div>
+</div>
+
+<style>
+.loc-tag{display:inline-block;padding:7px 14px;border-radius:20px;border:1.5px solid var(--gray-m);font-size:13px;cursor:pointer;background:#FAFAF9;color:var(--gray);transition:all .15s;user-select:none}
+.loc-tag.active{background:var(--blue-l);border-color:var(--blue);color:var(--blue);font-weight:500}
+</style>
+
+<div class="btn-wrap">
+  <button class="btn btn-primary" onclick="calcularResultados()">✓ Ver mis resultados</button>
+  <button class="btn btn-secondary" onclick="window.print()">🖨 Imprimir formulario</button>
+</div>
+
+<!-- RESULTADOS -->
+<div id="resultados" style="margin-top:28px">
+  <div class="result-card">
+    <h3>📊 Resultados de sus cuestionarios — <span id="res-fecha"></span></h3>
+
+    <!-- NDI Resultado -->
+    <div style="margin-bottom:20px">
+      <p style="font-size:12px;font-weight:500;color:var(--text-s);margin-bottom:8px">ÍNDICE DE DISCAPACIDAD DEL CUELLO (NDI)</p>
+      <div class="score-display">
+        <div class="score-big" id="ndi-score-big">—</div>
+        <div class="score-detail">
+          <span>Puntuación sobre 50</span><br>
+          <span id="ndi-pct-text" style="color:var(--text-s)"></span><br>
+          <span class="severity" id="ndi-sev"></span>
+        </div>
+      </div>
+      <div class="score-bar"><div class="score-fill" id="ndi-bar" style="background:var(--blue)"></div></div>
+      <p style="font-size:11px;color:var(--text-s)">0–4 sin discapacidad · 5–14 leve · 15–24 moderada · 25–34 grave · 35–50 completa</p>
+    </div>
+
+    <!-- mJOA Resultado -->
+    <div style="margin-bottom:20px;border-top:1px solid var(--gray-l);padding-top:16px">
+      <p style="font-size:12px;font-weight:500;color:var(--text-s);margin-bottom:8px">FUNCIÓN NEUROLÓGICA (mJOA)</p>
+      <div class="score-display">
+        <div class="score-big" id="mjoa-score-big">—</div>
+        <div class="score-detail">
+          <span>Puntuación sobre 15</span><br>
+          <span id="mjoa-pct-text" style="color:var(--text-s)"></span><br>
+          <span class="severity" id="mjoa-sev"></span>
+        </div>
+      </div>
+      <div class="score-bar"><div class="score-fill" id="mjoa-bar" style="background:var(--blue)"></div></div>
+      <div class="result-grid" id="mjoa-subs"></div>
+      <p style="font-size:11px;color:var(--text-s);margin-top:6px">15–17 leve · 12–14 moderada · ≤11 grave (escala clínica completa 0–18)</p>
+    </div>
+
+    <!-- EVA Resultado -->
+    <div style="border-top:1px solid var(--gray-l);padding-top:16px">
+      <p style="font-size:12px;font-weight:500;color:var(--text-s);margin-bottom:8px">DOLOR ACTUAL (EVA)</p>
+      <div class="score-display">
+        <div class="score-big" id="eva-score-big">—</div>
+        <div class="score-detail">
+          <span>Sobre 10</span><br>
+          <span id="eva-sev-text" style="color:var(--text-s)"></span><br>
+          <span id="eva-loc-text" style="color:var(--text-s);font-size:12px"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="disclaimer">⚠ Estos resultados son para uso clínico de su fisioterapeuta. No los interprete usted solo como diagnóstico. Llévelos a su próxima cita.</div>
+
+    <p style="font-size:12px;color:var(--text-s);margin-top:16px;margin-bottom:6px;font-weight:500">Texto para copiar y enviar a su fisioterapeuta:</p>
+    <div class="copy-block" id="copy-block"></div>
+    <button class="btn btn-secondary" style="margin-top:10px;font-size:13px" onclick="copiarResultados()">📋 Copiar resultados</button>
+  </div>
+</div>
+
+</div><!-- page-wrap -->
+
+<script>
+// State
+var ndi = new Array(10).fill(null);
+var mjoa = new Array(5).fill(null);
+var evaVal = 5;
+var totalQ = 16;
+
+// Set date
+var today = new Date();
+document.getElementById('fecha-display').textContent = today.toLocaleDateString('es-ES',{day:'2-digit',month:'long',year:'numeric'});
+
+function selectOpt(el,type,idx,val){
+  var parent = el.parentElement;
+  parent.querySelectorAll('.opt,.opt-mjoa').forEach(function(o){o.classList.remove('selected')});
+  el.classList.add('selected');
+  el.querySelector('input').checked = true;
+  if(type==='ndi') ndi[idx]=val;
+  else if(type==='mjoa') mjoa[idx]=val;
+  updateProgress();
+}
+
+function toggleLoc(el){el.classList.toggle('active')}
+
+function updateEVA(v){
+  evaVal=parseInt(v);
+  document.getElementById('eva-val').textContent=v;
+  var descs=['Sin dolor','Casi sin dolor','Dolor muy leve','Dolor leve','Dolor leve-moderado','Dolor moderado','Dolor moderado-intenso','Dolor bastante intenso','Dolor muy intenso','Dolor severísimo','Dolor máximo insoportable'];
+  document.getElementById('eva-desc').textContent=descs[v];
+}
+
+function updateProgress(){
+  var done = ndi.filter(function(v){return v!==null}).length + mjoa.filter(function(v){return v!==null}).length;
+  document.getElementById('progress-text').innerHTML='Completadas: <strong>'+done+' de '+totalQ+' preguntas</strong>';
+  document.getElementById('progress-fill').style.width=(done/totalQ*100)+'%';
+}
+
+function calcularResultados(){
+  var ndiNull = ndi.some(function(v){return v===null});
+  var mjoaNull = mjoa.some(function(v){return v===null});
+  if(ndiNull||mjoaNull){
+    alert('⚠ Por favor, responda todas las preguntas antes de ver los resultados.');
+    return;
+  }
+  var ndiTotal = ndi.reduce(function(a,b){return a+b},0);
+  var mjoaTotal = mjoa.reduce(function(a,b){return a+b},0);
+
+  document.getElementById('ndi-score-big').textContent=ndiTotal;
+  document.getElementById('ndi-pct-text').textContent=(Math.round(ndiTotal/50*100))+'% de discapacidad';
+  document.getElementById('ndi-bar').style.width=(ndiTotal/50*100)+'%';
+  var ndiCls,ndiTxt;
+  if(ndiTotal<=4){ndiCls='sev-mild';ndiTxt='Sin discapacidad';}
+  else if(ndiTotal<=14){ndiCls='sev-mild';ndiTxt='Discapacidad leve';}
+  else if(ndiTotal<=24){ndiCls='sev-mod';ndiTxt='Discapacidad moderada';}
+  else if(ndiTotal<=34){ndiCls='sev-severe';ndiTxt='Discapacidad grave';}
+  else{ndiCls='sev-severe';ndiTxt='Discapacidad completa';}
+  var ndiSev=document.getElementById('ndi-sev');
+  ndiSev.className='severity '+ndiCls;ndiSev.textContent=ndiTxt;
+  document.getElementById('ndi-bar').style.background=ndiTotal<=14?'var(--green)':ndiTotal<=24?'var(--amber)':'var(--red)';
+
+  document.getElementById('mjoa-score-big').textContent=mjoaTotal;
+  document.getElementById('mjoa-pct-text').textContent='(escala 0–15 en versión paciente)';
+  document.getElementById('mjoa-bar').style.width=(mjoaTotal/15*100)+'%';
+  var mjoaCls,mjoaTxt;
+  if(mjoaTotal>=13){mjoaCls='sev-mild';mjoaTxt='Afectación leve';}
+  else if(mjoaTotal>=10){mjoaCls='sev-mod';mjoaTxt='Afectación moderada';}
+  else{mjoaCls='sev-severe';mjoaTxt='Afectación grave';}
+  var mjoaSev=document.getElementById('mjoa-sev');
+  mjoaSev.className='severity '+mjoaCls;mjoaSev.textContent=mjoaTxt;
+  document.getElementById('mjoa-bar').style.background=mjoaTotal>=13?'var(--green)':mjoaTotal>=10?'var(--amber)':'var(--red)';
+
+  var subs=document.getElementById('mjoa-subs');
+  var lbls=['Motor manos/brazos','Motor piernas','Sensib. manos/brazos','Sensib. piernas/tronco','Control vejiga'];
+  var maxs=[4,4,2,2,3];
+  subs.innerHTML=lbls.map(function(l,i){
+    return '<div class="result-sub"><div class="result-sub-lbl">'+l+'</div><div class="result-sub-val">'+mjoa[i]+' / '+maxs[i]+'</div></div>';
+  }).join('');
+
+  var evaBig=document.getElementById('eva-score-big');
+  evaBig.textContent=evaVal;
+  evaBig.style.color=evaVal<=3?'var(--green)':evaVal<=6?'var(--amber)':'var(--red)';
+  document.getElementById('eva-sev-text').textContent=evaVal<=3?'Dolor leve o sin dolor':evaVal<=6?'Dolor moderado':'Dolor intenso';
+
+  var locs=[];
+  document.querySelectorAll('.loc-tag.active').forEach(function(el){locs.push(el.textContent.trim())});
+  document.getElementById('eva-loc-text').textContent=locs.length?'Zonas: '+locs.join(', '):'Localización: no especificada';
+
+  // Copy text
+  document.getElementById('res-fecha').textContent=today.toLocaleDateString('es-ES',{day:'2-digit',month:'long',year:'numeric'});
+  var txt='RESULTADOS CUESTIONARIOS — Fernando Pérez Soler\n';
+  txt+='Fecha: '+today.toLocaleDateString('es-ES')+'\n\n';
+  txt+='NDI (Discapacidad cervical): '+ndiTotal+'/50 → '+ndiTxt+'\n';
+  txt+='mJOA (Función neurológica): '+mjoaTotal+'/15\n';
+  txt+='  · Motor manos/brazos: '+mjoa[0]+'/4\n';
+  txt+='  · Motor piernas: '+mjoa[1]+'/4\n';
+  txt+='  · Sensibilidad manos/brazos: '+mjoa[2]+'/2\n';
+  txt+='  · Sensibilidad piernas/tronco: '+mjoa[3]+'/2\n';
+  txt+='  · Control vejiga: '+mjoa[4]+'/3\n';
+  txt+='EVA dolor actual: '+evaVal+'/10'+(locs.length?' — '+locs.join(', '):'')+'\n';
+  document.getElementById('copy-block').textContent=txt;
+
+  document.getElementById('resultados').style.display='block';
+  setTimeout(function(){document.getElementById('resultados').scrollIntoView({behavior:'smooth'})},100);
+}
+
+function copiarResultados(){
+  var t=document.getElementById('copy-block').textContent;
+  navigator.clipboard.writeText(t).then(function(){alert('✓ Resultados copiados al portapapeles')});
+}
+
+updateEVA(5);
+</script>
+</body>
+</html>
