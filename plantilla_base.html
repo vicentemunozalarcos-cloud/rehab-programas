@@ -38,6 +38,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .ex-name{font-size:.83rem;font-weight:600;flex:1;min-width:120px}
 .yt-btn{background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:.72rem;color:var(--r);cursor:pointer;display:flex;align-items:center;gap:3px;white-space:nowrap;flex-shrink:0;-webkit-tap-highlight-color:transparent;text-decoration:none}
 .yt-btn:hover,.yt-btn:active{background:var(--rl)}
+.yt-btn.has-video{background:var(--r);color:#fff;border-color:var(--r);font-weight:700;box-shadow:0 1px 5px rgba(216,90,48,.4)}
+.yt-btn.has-video:hover,.yt-btn.has-video:active{background:#B84A26}
 .del-ex{background:none;border:none;cursor:pointer;color:var(--textm);font-size:18px;padding:2px;flex-shrink:0;line-height:1;-webkit-tap-highlight-color:transparent}
 .del-ex:hover{color:var(--r)}
 .ex-controls{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:.6rem}
@@ -61,6 +63,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .rpe-chip:hover{border-color:var(--g)}
 .rpe-chip.sel{background:var(--g);color:#fff;border-color:var(--g)}
 .rpe-hint{font-size:.68rem;color:var(--textm)}
+.rpe-alert{display:flex;align-items:center;gap:5px;background:var(--rl);color:var(--r);padding:5px 9px;border-radius:8px;font-weight:700;font-size:.75rem;margin-top:5px;border:1px solid var(--r);animation:rpePulse 1.6s ease-in-out infinite}
+@keyframes rpePulse{0%,100%{opacity:1}50%{opacity:.6}}
 .notes-input{width:100%;padding:4px 6px;font-size:.75rem;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-family:inherit}
 .add-btn{display:flex;align-items:center;gap:6px;width:100%;padding:.55rem 1rem;border:1.5px dashed var(--border);border-radius:10px;background:none;cursor:pointer;font-size:.8rem;color:var(--g);justify-content:center;margin-top:.5rem;transition:background .15s;-webkit-tap-highlight-color:transparent}
 .add-btn:hover,.add-btn:active{background:var(--gl)}
@@ -110,6 +114,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 <div class="alert-text">Para no perder tu historial, abre este enlace <strong>siempre desde el mismo dispositivo y el mismo navegador</strong> (Chrome de tu Android o Safari de tu iPhone). Si lo abres desde otro dispositivo, los registros anteriores no estarán visibles. No borres los datos del navegador.</div>
 </div>
 </div>
+<div class="alert" style="background:var(--gl);border-color:var(--g)">
+<div style="font-size:1.4rem;flex-shrink:0;margin-top:1px">💪</div>
+<div>
+<div class="alert-title" style="color:var(--gd)">¿Qué es el RPE?</div>
+<div class="alert-text" style="color:var(--gd)">El RPE es tu esfuerzo percibido en cada serie (escala 6-20, donde 20 es el máximo). <strong>Regístralo al terminar cada serie</strong>: si tu esfuerzo real queda por debajo del objetivo marcado, el sistema te avisará para que añadas más repeticiones esa sesión.</div>
+</div>
+</div>
 <div class="tabs">
 <button class="tab active" onclick="showPanel('entreno')">🏋️ Entrenamiento</button>
 <button class="tab" onclick="showPanel('historial')">📊 Historial</button>
@@ -129,7 +140,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 <div class="sum-grid">
 <div class="sum-card"><div class="sum-val" id="sh-ses">0</div><div class="sum-lbl">Sesiones</div></div>
 <div class="sum-card"><div class="sum-val" id="sh-exs">0</div><div class="sum-lbl">Ejercicios</div></div>
-<div class="sum-card"><div class="sum-val" id="sh-avg">—</div><div class="sum-lbl">Dolor medio</div></div>
+<div class="sum-card"><div class="sum-val" id="sh-avg">—</div><div class="sum-lbl">RPE medio</div></div>
 </div>
 <div id="hist-list"></div>
 <button class="save-btn" style="background:var(--r);margin-top:.5rem" onclick="clearAll()">🗑 Borrar historial</button>
@@ -186,20 +197,21 @@ var blockDefs = [
 ];
 /* PLANTILLA BASE — sustituye los ejercicios de cada bloque por los del cliente.
    Estructura fija: b0=Calentamiento, b1=Principal bloque 1, b2=Principal bloque 2.
-   Cada ejercicio: {id, name, kg, reps, unit('rep'|'seg'|'min'), yt, rpe:null, evaDur:0, evaPost:0, eva24:0} */
+   Cada ejercicio: {id, name, kg, reps, unit('rep'|'seg'|'min'), yt, rpe}.
+   RPE por defecto: 8 en calentamiento, 14 en bloques principales (criterio KINETIQ). */
 var blocks = [
 {id:'b0', series:2, exercises:[
-{id:'e0',name:'{{EJERCICIO_CALENTAMIENTO_1}}', kg:0, reps:10, unit:'rep',yt:'', rpe:null,evaDur:0,evaPost:0,eva24:0},
-{id:'e1',name:'{{EJERCICIO_CALENTAMIENTO_2}}', kg:0, reps:10, unit:'rep',yt:'',rpe:null,evaDur:0,evaPost:0,eva24:0},
-{id:'e2',name:'{{EJERCICIO_CALENTAMIENTO_3}}', kg:0, reps:10, unit:'rep',yt:'',rpe:null,evaDur:0,evaPost:0,eva24:0}
+{id:'e0',name:'{{EJERCICIO_CALENTAMIENTO_1}}', kg:0, reps:10, unit:'rep',yt:'', rpe:8},
+{id:'e1',name:'{{EJERCICIO_CALENTAMIENTO_2}}', kg:0, reps:10, unit:'rep',yt:'',rpe:8},
+{id:'e2',name:'{{EJERCICIO_CALENTAMIENTO_3}}', kg:0, reps:10, unit:'rep',yt:'',rpe:8}
 ]},
 {id:'b1', series:4, exercises:[
-{id:'e3',name:'{{EJERCICIO_BLOQUE1_1}}', kg:0,reps:10,unit:'rep',yt:'',rpe:null,evaDur:0,evaPost:0,eva24:0},
-{id:'e4',name:'{{EJERCICIO_BLOQUE1_2}}', kg:0,reps:10,unit:'rep',yt:'',rpe:null,evaDur:0,evaPost:0,eva24:0}
+{id:'e3',name:'{{EJERCICIO_BLOQUE1_1}}', kg:0,reps:10,unit:'rep',yt:'',rpe:14},
+{id:'e4',name:'{{EJERCICIO_BLOQUE1_2}}', kg:0,reps:10,unit:'rep',yt:'',rpe:14}
 ]},
 {id:'b2', series:4, exercises:[
-{id:'e6',name:'{{EJERCICIO_BLOQUE2_1}}', kg:0,reps:10,unit:'rep',yt:'',rpe:null,evaDur:0,evaPost:0,eva24:0},
-{id:'e7',name:'{{EJERCICIO_BLOQUE2_2}}', kg:0,reps:10,unit:'rep',yt:'',rpe:null,evaDur:0,evaPost:0,eva24:0}
+{id:'e6',name:'{{EJERCICIO_BLOQUE2_1}}', kg:0,reps:10,unit:'rep',yt:'',rpe:14},
+{id:'e7',name:'{{EJERCICIO_BLOQUE2_2}}', kg:0,reps:10,unit:'rep',yt:'',rpe:14}
 ]}
 ];
 function getColor(v){
@@ -229,11 +241,14 @@ ex[field]=Math.max(min,Math.min(max,(parseFloat(ex[field])||0)+delta));
 var el=document.getElementById('sv-'+exId+'-'+field);
 if(el) el.textContent=ex[field];
 }
-function onEva(exId, field, val){
-var ex=findEx(exId);
-if(ex) ex[field]=parseInt(val);
-var bb=document.getElementById('bb-'+exId+'-'+field);
-if(bb){bb.textContent=val;bb.style.background=getColor(val);}
+function getRpeHintText(ex, blockId){
+if(!ex.rpe) return 'Sin seleccionar';
+var f=rpeList.find(function(r){return r.v===ex.rpe;});
+var txt='RPE '+ex.rpe+' — '+(f?f.h:'');
+if(blockId!=='b0' && ex.rpe<14){
+txt+='<div class="rpe-alert">⚠️ Añade 3 reps más en este ejercicio</div>';
+}
+return txt;
 }
 function selRpe(exId, val){
 var ex=findEx(exId);
@@ -242,11 +257,9 @@ ex.rpe=(ex.rpe===val)?null:val;
 document.querySelectorAll('[data-rpe-ex="'+exId+'"]').forEach(function(c){
 c.classList.toggle('sel',parseInt(c.dataset.rpeVal)===ex.rpe);
 });
+var block=blocks.find(function(b){return b.exercises.some(function(e){return e.id===exId;});});
 var hint=document.getElementById('rpe-hint-'+exId);
-if(hint){
-if(ex.rpe){var f=rpeList.find(function(r){return r.v===ex.rpe;});hint.textContent='RPE '+ex.rpe+' — '+(f?f.h:'');}
-else hint.textContent='Sin seleccionar';
-}
+if(hint) hint.innerHTML=getRpeHintText(ex, block?block.id:'');
 }
 function delEx(blockId, exId){
 var b=blocks.find(function(x){return x.id===blockId;});
@@ -268,7 +281,7 @@ var url=document.getElementById('yt-input').value.trim();
 if(ex) ex.yt=url;
 var btn=document.getElementById('ytbtn-'+currentYtExId);
 var lnk=document.getElementById('ytlnk-'+currentYtExId);
-if(btn) btn.textContent=url?'▶ Ver vídeo':'+ YouTube';
+if(btn){btn.textContent=url?'▶ Cómo se hace':'+ Vídeo';btn.classList.toggle('has-video',!!url);}
 if(lnk) lnk.style.display=url?'inline-flex':'none';
 if(lnk && url) lnk.href=url;
 closeYtModal();
@@ -282,7 +295,7 @@ if(!name) return;
 var bi=parseInt(document.getElementById('m-block').value);
 var unit=document.getElementById('m-unit').value;
 var yt=document.getElementById('m-yt').value.trim();
-var ex={id:'e'+Date.now(),name:name,kg:0,reps:10,unit:unit,yt:yt,rpe:null,evaDur:0,evaPost:0,eva24:0};
+var ex={id:'e'+Date.now(),name:name,kg:0,reps:10,unit:unit,yt:yt,rpe:null};
 blocks[bi].exercises.push(ex);
 var container=document.getElementById('exrows-'+blocks[bi].id);
 if(container){var div=document.createElement('div');div.innerHTML=buildExRowHTML(ex,blocks[bi]);container.appendChild(div.firstChild);}
@@ -293,23 +306,12 @@ function buildExRowHTML(ex, b){
 var rpeChips=rpeList.map(function(r){
 return '<div class="rpe-chip'+(ex.rpe===r.v?' sel':'')+'" data-rpe-ex="'+ex.id+'" data-rpe-val="'+r.v+'" onclick="selRpe(\''+ex.id+'\','+r.v+')" title="'+r.h+'">'+r.l+'</div>';
 }).join('');
-var rpeText=ex.rpe?('RPE '+ex.rpe+' — '+(rpeList.find(function(r){return r.v===ex.rpe;})||{h:''}).h):'Sin seleccionar';
-var evas=['evaDur|Durante','evaPost|Post sesión','eva24|24 horas'].map(function(pair){
-var p=pair.split('|'), field=p[0], label=p[1], val=ex[field]||0, uid=ex.id+'-'+field;
-return '<div class="eva-row-wrap">'+
-'<span class="eva-label">'+label+'</span>'+
-'<div class="eva-track">'+
-'<div class="eva-grad"></div>'+
-'<input type="range" class="eva-sl" min="0" max="10" step="1" value="'+val+'" oninput="onEva(\''+ex.id+'\',\''+field+'\',this.value)">'+
-'</div>'+
-'<div class="eva-bubble" id="bb-'+uid+'" style="background:'+getColor(val)+'">'+val+'</div>'+
-'</div>';
-}).join('');
+var rpeText=getRpeHintText(ex, b.id);
 var ytUrl=ex.yt||'';
 return '<div class="ex-row" id="exrow-'+ex.id+'">'+
 '<div class="ex-top">'+
 '<span class="ex-name">'+ex.name+'</span>'+
-'<button class="yt-btn" id="ytbtn-'+ex.id+'" onclick="openYtModal(\''+ex.id+'\')">'+(ytUrl?'▶ Ver vídeo':'+ YouTube')+'</button>'+
+'<button class="yt-btn'+(ytUrl?' has-video':'')+'" id="ytbtn-'+ex.id+'" onclick="openYtModal(\''+ex.id+'\')">'+(ytUrl?'▶ Cómo se hace':'+ Vídeo')+'</button>'+
 '<a class="yt-btn" id="ytlnk-'+ex.id+'" href="'+ytUrl+'" target="_blank" rel="noopener" style="display:'+(ytUrl?'inline-flex':'none')+'">↗</a>'+
 '<button class="del-ex" onclick="delEx(\''+b.id+'\',\''+ex.id+'\')" aria-label="Eliminar">🗑</button>'+
 '</div>'+
@@ -333,7 +335,6 @@ return '<div class="ex-row" id="exrow-'+ex.id+'">'+
 '<div class="rpe-chips">'+rpeChips+'</div>'+
 '<div class="rpe-hint" id="rpe-hint-'+ex.id+'">'+rpeText+'</div>'+
 '</div>'+
-'<div class="eva-section">'+evas+'</div>'+
 '</div>';
 }
 function buildBlocks(){
@@ -366,7 +367,7 @@ var snap=blocks.map(function(b){
 var def=blockDefs.find(function(d){return d.id===b.id;});
 return{title:def.title,series:b.series,exercises:b.exercises.map(function(ex){
 var notes=document.getElementById('notes-'+ex.id);
-return{name:ex.name,kg:ex.kg,reps:ex.reps,unit:ex.unit,rpe:ex.rpe,evaDur:ex.evaDur,evaPost:ex.evaPost,eva24:ex.eva24,notes:notes?notes.value:''};
+return{name:ex.name,kg:ex.kg,reps:ex.reps,unit:ex.unit,rpe:ex.rpe,notes:notes?notes.value:''};
 })};
 });
 sessions.push({date:date,blocks:snap});
@@ -383,21 +384,17 @@ if(name==='historial') renderHistory();
 }
 function renderHistory(){
 var totalEx=sessions.reduce(function(a,s){return a+s.blocks.reduce(function(aa,b){return aa+b.exercises.length;},0);},0);
-var allEva=[];
-sessions.forEach(function(s){s.blocks.forEach(function(b){b.exercises.forEach(function(ex){allEva.push(ex.evaDur||0,ex.evaPost||0,ex.eva24||0);});});});
-var avgEva=allEva.length?(allEva.reduce(function(a,b){return a+b;},0)/allEva.length).toFixed(1):'—';
+var allRpe=[];
+sessions.forEach(function(s){s.blocks.forEach(function(b){b.exercises.forEach(function(ex){if(ex.rpe) allRpe.push(ex.rpe);});});});
+var avgRpe=allRpe.length?(allRpe.reduce(function(a,b){return a+b;},0)/allRpe.length).toFixed(1):'—';
 document.getElementById('sh-ses').textContent=sessions.length;
 document.getElementById('sh-exs').textContent=totalEx;
-document.getElementById('sh-avg').textContent=avgEva;
+document.getElementById('sh-avg').textContent=avgRpe;
 if(!sessions.length){document.getElementById('hist-list').innerHTML='<div class="empty-hist">📭 Aún no hay sesiones guardadas</div>';return;}
-var html='<table class="hist-table"><thead><tr><th>Fecha</th><th>Detalle</th><th>Dolor</th></tr></thead><tbody>';
+var html='<table class="hist-table"><thead><tr><th>Fecha</th><th>Detalle</th></tr></thead><tbody>';
 sessions.slice().reverse().forEach(function(s){
-var evas=[];
-s.blocks.forEach(function(b){b.exercises.forEach(function(ex){evas.push(ex.evaDur||0,ex.evaPost||0,ex.eva24||0);});});
-var avg=evas.length?(evas.reduce(function(a,b){return a+b;},0)/evas.length).toFixed(1):0;
-var bc=parseFloat(avg)<=3?'bl':parseFloat(avg)<=6?'bm':'bh';
-var detail=s.blocks.map(function(b){return '<strong style="font-size:.7rem">'+b.title+'</strong>: '+b.exercises.map(function(ex){return ex.name+(ex.kg>0?' ('+ex.kg+'kg)':'');}).join(', ');}).join('<br>');
-html+='<tr><td style="white-space:nowrap">'+s.date+'</td><td><div class="hist-detail">'+detail+'</div></td><td><span class="badge '+bc+'">'+avg+'</span></td></tr>';
+var detail=s.blocks.map(function(b){return '<strong style="font-size:.7rem">'+b.title+'</strong>: '+b.exercises.map(function(ex){return ex.name+(ex.kg>0?' ('+ex.kg+'kg)':'')+(ex.rpe?' RPE'+ex.rpe:'');}).join(', ');}).join('<br>');
+html+='<tr><td style="white-space:nowrap">'+s.date+'</td><td><div class="hist-detail">'+detail+'</div></td></tr>';
 });
 html+='</tbody></table>';
 document.getElementById('hist-list').innerHTML=html;
