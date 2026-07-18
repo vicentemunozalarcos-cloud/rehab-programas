@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Entrenamiento TRX — Kike Tormos</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+--dark:#3F454F;--dark2:#2E3238;
+--g:#4FAE82;--gd:#2E8B63;--gl:#E4F4EC;
+--bg:#F4F5F3;--bg2:#FFFFFF;--border:#E1E3DE;
+--text:#262A2E;--textm:#6B7178;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-tap-highlight-color:transparent}
+.container{max-width:600px;margin:0 auto;padding:1rem}
+.hero{background:linear-gradient(160deg,var(--dark),var(--dark2));border-radius:18px;padding:1.75rem 1.25rem 1.5rem;margin-bottom:1.1rem;text-align:center;color:#fff}
+.hero img{width:64px;height:64px;border-radius:16px;margin-bottom:.65rem;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+.hero .brand{font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;color:var(--g);font-weight:700;margin-bottom:.2rem}
+.hero h1{font-size:1.3rem;font-weight:700}
+.hero p{font-size:.8rem;color:#B9BFC6;margin-top:.3rem}
+.block-card{background:var(--bg2);border:1px solid var(--border);border-radius:18px;overflow:hidden}
+.block-header{display:flex;align-items:center;justify-content:space-between;padding:.85rem 1.1rem;background:var(--gl)}
+.block-header .bt{font-size:.85rem;font-weight:700;color:var(--gd)}
+.block-header .bs{font-size:.72rem;font-weight:700;color:#fff;background:var(--g);padding:4px 11px;border-radius:20px}
+.ex-row{display:flex;align-items:center;gap:12px;padding:.9rem 1.1rem;border-bottom:1px solid var(--border)}
+.ex-row:last-child{border-bottom:none}
+.ex-num{width:28px;height:28px;border-radius:50%;background:var(--gl);color:var(--gd);font-size:.78rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.ex-info{flex:1;min-width:0}
+.ex-name{font-size:.86rem;font-weight:600;margin-bottom:2px}
+.ex-target{font-size:.74rem;color:var(--textm)}
+.yt-btn{background:none;border:1px solid var(--border);border-radius:8px;padding:6px 11px;font-size:.72rem;color:#D8572E;cursor:pointer;display:flex;align-items:center;gap:5px;white-space:nowrap;flex-shrink:0;font-family:inherit}
+.yt-btn:hover,.yt-btn:active{background:#FCEEE8}
+.yt-btn.has-video{background:#D8572E;color:#fff;border-color:#D8572E;font-weight:700;box-shadow:0 1px 5px rgba(216,87,46,.4)}
+.yt-btn.has-video:hover,.yt-btn.has-video:active{background:#B84A26}
+.footer-note{text-align:center;font-size:.7rem;color:var(--textm);margin-top:1rem;padding:0 1rem;line-height:1.5}
+.modal-ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;align-items:center;justify-content:center}
+.modal-ov.open{display:flex}
+.modal{background:var(--bg2);border-radius:18px;padding:1.4rem;width:90%;max-width:360px}
+.modal h3{font-size:.95rem;font-weight:700;margin-bottom:.9rem}
+.modal-field label{font-size:.75rem;color:var(--textm);display:block;margin-bottom:4px;font-weight:500}
+.modal-field input{width:100%;padding:8px 10px;border-radius:10px;border:1px solid var(--border);font-size:.83rem;background:var(--bg);color:var(--text);font-family:inherit}
+.modal-btns{display:flex;gap:8px;margin-top:1rem}
+.modal-btns button{flex:1;padding:.6rem;border-radius:10px;border:1px solid var(--border);cursor:pointer;font-size:.83rem;font-weight:600;background:var(--bg);color:var(--text);font-family:inherit}
+.modal-btns .ok{background:var(--g);color:#fff;border-color:var(--g)}
+.toast{position:fixed;bottom:1.25rem;left:50%;transform:translateX(-50%) translateY(60px);background:var(--dark2);color:#fff;padding:.55rem 1.2rem;border-radius:20px;font-size:.82rem;z-index:400;transition:transform .3s;white-space:nowrap;pointer-events:none}
+.toast.show{transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="hero">
+<img src="logo_kinetiq.jpg" alt="KINETIQ">
+<div class="brand">Kinetiq</div>
+<h1>Kike Tormos</h1>
+<p>Entrenamiento TRX — bloque único</p>
+</div>
+<div class="block-card">
+<div class="block-header">
+<span class="bt">Circuito</span>
+<span class="bs">5 series</span>
+</div>
+<div id="exercises"></div>
+</div>
+<div class="footer-note">Pulsa el botón naranja de cada ejercicio para ver cómo se hace en YouTube.</div>
+</div>
+<div class="modal-ov" id="yt-modal">
+<div class="modal">
+<h3>▶️ Enlace YouTube</h3>
+<div class="modal-field"><label>Pega el enlace del vídeo</label><input type="url" id="yt-input" placeholder="https://youtube.com/watch?v=..."></div>
+<div class="modal-btns">
+<button onclick="closeYtModal()">Cancelar</button>
+<button class="ok" onclick="saveYtLink()">Guardar</button>
+</div>
+</div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+var exercises = [
+{id:'e0', name:'Remo TRX', reps:12, unit:'rep', yt:'https://www.youtube.com/watch?v=yCuSGoe1gjY'},
+{id:'e1', name:'Sentadillas TRX', reps:20, unit:'rep', yt:'https://www.youtube.com/watch?v=ry5t4GgUsuM'},
+{id:'e2', name:'Zancadas atrás alternas TRX', reps:20, unit:'rep', yt:'https://www.youtube.com/watch?v=c923ekJ8V50'},
+{id:'e3', name:'Bíceps TRX', reps:10, unit:'rep', yt:'https://www.youtube.com/watch?v=65DFAk9Y-Lc'},
+{id:'e4', name:'Flexiones rodillas', reps:10, unit:'rep', yt:'https://www.youtube.com/watch?v=8XQ-okb5NWE'}
+];
+var currentYtExId=null;
+function findEx(id){return exercises.find(function(e){return e.id===id;});}
+function buildRows(){
+var c=document.getElementById('exercises');
+c.innerHTML=exercises.map(function(ex,i){
+var ytUrl=ex.yt||'';
+return '<div class="ex-row">'+
+'<div class="ex-num">'+(i+1)+'</div>'+
+'<div class="ex-info">'+
+'<div class="ex-name">'+ex.name+'</div>'+
+'<div class="ex-target">'+ex.reps+' '+(ex.unit==='rep'?'reps':ex.unit)+'</div>'+
+'</div>'+
+'<button class="yt-btn'+(ytUrl?' has-video':'')+'" id="ytbtn-'+ex.id+'" onclick="openYtModal(\''+ex.id+'\')">'+
+'<svg width="15" height="15" viewBox="0 0 24 24" style="flex-shrink:0"><rect x="1" y="4" width="22" height="16" rx="5" fill="currentColor"/><polygon points="10,8.5 10,15.5 16.5,12" fill="#fff"/></svg>'+
+(ytUrl?'Cómo se hace':'Vídeo')+'</button>'+
+'</div>';
+}).join('');
+}
+function openYtModal(exId){
+currentYtExId=exId;
+var ex=findEx(exId);
+document.getElementById('yt-input').value=ex?(ex.yt||''):'';
+document.getElementById('yt-modal').classList.add('open');
+}
+function closeYtModal(){document.getElementById('yt-modal').classList.remove('open');currentYtExId=null;}
+function saveYtLink(){
+if(!currentYtExId) return;
+var ex=findEx(currentYtExId);
+var url=document.getElementById('yt-input').value.trim();
+if(ex) ex.yt=url;
+var btn=document.getElementById('ytbtn-'+currentYtExId);
+if(btn){
+btn.innerHTML='<svg width="15" height="15" viewBox="0 0 24 24" style="flex-shrink:0"><rect x="1" y="4" width="22" height="16" rx="5" fill="currentColor"/><polygon points="10,8.5 10,15.5 16.5,12" fill="#fff"/></svg>'+(url?'Cómo se hace':'Vídeo');
+btn.classList.toggle('has-video',!!url);
+}
+closeYtModal();
+toast('Enlace guardado');
+}
+function toast(msg){var t=document.getElementById('toast');t.textContent='✓ '+msg;t.classList.add('show');setTimeout(function(){t.classList.remove('show');},2500);}
+buildRows();
+</script>
+</body>
+</html>
