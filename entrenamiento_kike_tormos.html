@@ -31,8 +31,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .ex-target{font-size:.74rem;color:var(--textm)}
 .yt-btn{background:none;border:1px solid var(--border);border-radius:8px;padding:6px 11px;font-size:.72rem;color:#D8572E;cursor:pointer;display:flex;align-items:center;gap:5px;white-space:nowrap;flex-shrink:0;font-family:inherit}
 .yt-btn:hover,.yt-btn:active{background:#FCEEE8}
-.yt-btn.has-video{background:#D8572E;color:#fff;border-color:#D8572E;font-weight:700;box-shadow:0 1px 5px rgba(216,87,46,.4)}
+.yt-btn.has-video{background:#D8572E;color:#fff;border-color:#D8572E;font-weight:700;box-shadow:0 1px 5px rgba(216,87,46,.4);text-decoration:none}
 .yt-btn.has-video:hover,.yt-btn.has-video:active{background:#B84A26}
+.edit-btn{background:none;border:none;color:var(--textm);font-size:.85rem;cursor:pointer;padding:4px 6px;flex-shrink:0}
+.edit-btn:hover{color:var(--text)}
 .footer-note{text-align:center;font-size:.7rem;color:var(--textm);margin-top:1rem;padding:0 1rem;line-height:1.5}
 .modal-ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;align-items:center;justify-content:center}
 .modal-ov.open{display:flex}
@@ -89,15 +91,23 @@ function buildRows(){
 var c=document.getElementById('exercises');
 c.innerHTML=exercises.map(function(ex,i){
 var ytUrl=ex.yt||'';
+var videoBtn = ytUrl
+? '<a class="yt-btn has-video" id="ytbtn-'+ex.id+'" href="'+ytUrl+'" target="_blank" rel="noopener">'+
+  '<svg width="15" height="15" viewBox="0 0 24 24" style="flex-shrink:0"><rect x="1" y="4" width="22" height="16" rx="5" fill="currentColor"/><polygon points="10,8.5 10,15.5 16.5,12" fill="#fff"/></svg>'+
+  'Cómo se hace</a>'
+: '<button class="yt-btn" id="ytbtn-'+ex.id+'" onclick="openYtModal(\''+ex.id+'\')">'+
+  '<svg width="15" height="15" viewBox="0 0 24 24" style="flex-shrink:0"><rect x="1" y="4" width="22" height="16" rx="5" fill="currentColor"/><polygon points="10,8.5 10,15.5 16.5,12" fill="#fff"/></svg>'+
+  'Vídeo</button>';
+var editBtn = ytUrl
+? '<button class="edit-btn" onclick="openYtModal(\''+ex.id+'\')" title="Editar enlace" aria-label="Editar enlace">✎</button>'
+: '';
 return '<div class="ex-row">'+
 '<div class="ex-num">'+(i+1)+'</div>'+
 '<div class="ex-info">'+
 '<div class="ex-name">'+ex.name+'</div>'+
 '<div class="ex-target">'+ex.reps+' '+(ex.unit==='rep'?'reps':ex.unit)+'</div>'+
 '</div>'+
-'<button class="yt-btn'+(ytUrl?' has-video':'')+'" id="ytbtn-'+ex.id+'" onclick="openYtModal(\''+ex.id+'\')">'+
-'<svg width="15" height="15" viewBox="0 0 24 24" style="flex-shrink:0"><rect x="1" y="4" width="22" height="16" rx="5" fill="currentColor"/><polygon points="10,8.5 10,15.5 16.5,12" fill="#fff"/></svg>'+
-(ytUrl?'Cómo se hace':'Vídeo')+'</button>'+
+videoBtn+editBtn+
 '</div>';
 }).join('');
 }
@@ -113,11 +123,7 @@ if(!currentYtExId) return;
 var ex=findEx(currentYtExId);
 var url=document.getElementById('yt-input').value.trim();
 if(ex) ex.yt=url;
-var btn=document.getElementById('ytbtn-'+currentYtExId);
-if(btn){
-btn.innerHTML='<svg width="15" height="15" viewBox="0 0 24 24" style="flex-shrink:0"><rect x="1" y="4" width="22" height="16" rx="5" fill="currentColor"/><polygon points="10,8.5 10,15.5 16.5,12" fill="#fff"/></svg>'+(url?'Cómo se hace':'Vídeo');
-btn.classList.toggle('has-video',!!url);
-}
+buildRows();
 closeYtModal();
 toast('Enlace guardado');
 }
